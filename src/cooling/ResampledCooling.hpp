@@ -172,7 +172,8 @@ auto computeCooling(amrex::MultiFab &mf, std::array<amrex::MultiFab, AMREX_SPACE
 
 	const int nmax = nsubstepsMF.max(0);
 	const Real navg = static_cast<Real>(nsubstepsMF.sum(0)) / static_cast<Real>(nsubstepsMF.boxArray().numPts());
-	amrex::Print() << std::format("\tcooling substeps (per cell): avg {}, max {}\n", navg, nmax);
+	if (amrex::Verbose())
+		amrex::Print() << std::format("\tcooling substeps (per cell): avg {}, max {}\n", navg, nmax);
 
 	// check if integration succeeded
 	if (nmax >= maxStepsODEIntegrate) {

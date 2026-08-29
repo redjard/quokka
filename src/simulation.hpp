@@ -1471,7 +1471,9 @@ template <typename problem_t> void AMRSimulation<problem_t>::evolve()
 	for (; step < maxTimesteps_ && cur_time < stopTime_; ++step) {
 
 		if (suppress_output == 0) {
-			amrex::Print() << "\nCoarse STEP " << step + 1 << " at t = " << cur_time << " (" << (cur_time / stopTime_) * 100. << "%) starts ";
+			if (amrex::Verbose())
+				amrex::Print() << "\n";
+			amrex::Print() << "Coarse STEP " << step + 1 << " at t = " << cur_time << " (" << (cur_time / stopTime_) * 100. << "%) starts ";
 		}
 
 		amrex::ParallelDescriptor::Barrier(); // synchronize all MPI ranks
