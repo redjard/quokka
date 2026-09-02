@@ -478,6 +478,20 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::setInitialConditionsOnGrid
 	amrex::Print() << "REDJARD: ran setInitialConditionsOnGrid in " << float(clock() - start)/1e6 << " s\n";
 }
 
+template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::createInitialCICParticles()
+{
+	// read particles from ASCII file
+	amrex::ParmParse const pp("disk_galaxy");
+	std::string filename;
+	pp.query("particle_file", filename);
+
+	amrex::Print() << "\nReading particles from ASCII file " << filename << "...\n";
+	CICParticles->SetVerbose(1);
+	const int nreal_extra = 4; // mass vx vy vz
+	CICParticles->InitFromAsciiFile(filename, nreal_extra, nullptr);
+	amrex::Print() << "\n";
+}
+
 template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::refineGrid(int lev, amrex::TagBoxArray &tags, amrex::Real _time, int _ngrow)
 {
 	// amrex::Print() << "refineGrid\n";
