@@ -429,8 +429,7 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::setInitialConditionsOnGrid
 		double const momx_disk_halo = momx;
 		double const momy_disk_halo = momy;
 		double const momz_disk_halo = momz;
-		double const Ekin_disk_halo =
-		    0.5 * (momx_disk_halo * momx_disk_halo + momy_disk_halo * momy_disk_halo + momz_disk_halo * momz_disk_halo) / rho_disk_halo;
+		double const Ekin_disk_halo = 0.5 * (momx_disk_halo * momx_disk_halo + momy_disk_halo * momy_disk_halo + momz_disk_halo * momz_disk_halo) / rho_disk_halo;
 		double const Eint_disk_halo = Eint;
 		// double const Etot_disk_halo = Eint_disk_halo + Ekin_disk_halo + Emag;
 		double const Etot_disk_halo = Eint_disk_halo + Ekin_disk_halo + 0;
@@ -514,6 +513,42 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::refineGrid(int lev, amrex:
 	});
 	amrex::Gpu::streamSynchronize();
 	// amrex::Print() << "REDJARD: ran refineGrid in " << float(clock() - start)/1e6 << " s\n";
+}
+
+// // example: analytic halo potential acceleration
+// amrex::GpuArray<Real,3> grav_accel(Real x, Real y, Real z) {
+// 	// return (-dPhi/dx, -dPhi/dy, -dPhi/dz)
+// }
+void apply_dm_potential( QuokkaSimulation<DiskGalaxy_no_mhd>const*const sim ) {
+	amrex::Print() << "REDJARD: finestLevel = " << sim->finestLevel() << "\n"; //
+	
+	// quokka::grid const &grid_elem
+	// const amrex::Array4<double> &state_cc = grid_elem.array_;
+	
+	// for (int lev = 0; lev <= sim->finestLevel(); ++lev) {
+	// 	auto& level = sim->getLevel(lev);
+		
+	// 	for (auto& grid : level.grids()) {
+	// 		auto const& U = grid.data();
+			
+	// 		// loop over cells
+	// 		for (int k = 0; k < grid.nz(); ++k)
+	// 		for (int j = 0; j < grid.ny(); ++j)
+	// 		for (int i = 0; i < grid.nx(); ++i) {
+	// 			const Real rho = U(i,j,k, HydroSystem<DiskGalaxy_no_mhd>::density_index);
+	// 			const Real mx  = U(i,j,k, HydroSystem<DiskGalaxy_no_mhd>::x1Momentum_index);
+	// 			const Real my  = U(i,j,k, HydroSystem<DiskGalaxy_no_mhd>::x2Momentum_index);
+	// 			const Real mz  = U(i,j,k, HydroSystem<DiskGalaxy_no_mhd>::x3Momentum_index);
+				
+	// 			const Real vx = mx / rho;
+	// 			const Real vy = my / rho;
+	// 			const Real vz = mz / rho;
+	// 		}
+	// 	}
+	// }
+}
+template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::computeAfterTimestep() {
+	apply_dm_potential(this);
 }
 
 auto problem_main() -> int

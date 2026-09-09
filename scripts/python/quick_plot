@@ -471,6 +471,8 @@ def main(args):
         args.field = ("gas", "velocity")
     elif args.field in ['p', 'momentum']:
         args.field = ("gas", "momentum_density")
+    elif ',' in args.field:
+        args.field = args.field.split(',')
     else:
         args.field = ("boxlib", args.field)
 
