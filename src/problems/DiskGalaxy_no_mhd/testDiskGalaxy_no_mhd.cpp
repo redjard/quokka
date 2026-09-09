@@ -15,15 +15,12 @@
 #include "AMReX_FabArrayBase.H"
 #include "AMReX_GpuContainers.H"
 #include "AMReX_GpuDevice.H"
-#include "AMReX_MultiFab.H"
-#include "AMReX_MultiFabUtil.H"
 #include "AMReX_ParallelContext.H"
 #include "AMReX_ParallelReduce.H"
 #include "AMReX_Parser.H"
 #include "AMReX_Print.H"
 #include "AMReX_REAL.H"
 #include "AMReX_Reduce.H"
-#include "AMReX_iMultiFab.H"
 
 #include "QuokkaSimulation.hpp"
 #include "SimulationData.hpp"
@@ -33,9 +30,7 @@
 #include "math/interpolate.hpp"
 #include "math/quadrature.hpp"
 #include "math/spherical_geometry.hpp"
-// #include "particles/particle_types.hpp"
 #include "physics_info.hpp"
-// #include "util/BC.hpp"
 #include "util/DataTable.hpp"
 
 struct DiskGalaxy_no_mhd {
@@ -519,37 +514,41 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::refineGrid(int lev, amrex:
 // amrex::GpuArray<Real,3> grav_accel(Real x, Real y, Real z) {
 // 	// return (-dPhi/dx, -dPhi/dy, -dPhi/dz)
 // }
-void apply_dm_potential( QuokkaSimulation<DiskGalaxy_no_mhd>const*const sim ) {
-	amrex::Print() << "REDJARD: finestLevel = " << sim->finestLevel() << "\n"; //
-	
-	// quokka::grid const &grid_elem
-	// const amrex::Array4<double> &state_cc = grid_elem.array_;
-	
-	// for (int lev = 0; lev <= sim->finestLevel(); ++lev) {
-	// 	auto& level = sim->getLevel(lev);
-		
-	// 	for (auto& grid : level.grids()) {
-	// 		auto const& U = grid.data();
+void apply_dm_potential( QuokkaSimulation<DiskGalaxy_no_mhd>*const sim ) {
+	for (int level = 0; level <= sim->finestLevel(); ++level) {
+		// taken from simulation.hpp setInitialConditionsAtLevel_cc
+		for (amrex::MFIter iter(sim->state_new_cc_[level]); iter.isValid(); ++iter) {
+			quokka::grid grid_elem(
+				sim->state_new_cc_[level].array(iter),
+				iter.validbox(),
+				sim->geom[level].CellSizeArray(),
+				sim->geom[level].ProbLoArray(),
+				sim->geom[level].ProbHiArray(),
+				quokka::centering::cc,
+				quokka::direction::na
+			);
+			// setInitialConditionsOnGrid(grid_elem);
 			
-	// 		// loop over cells
-	// 		for (int k = 0; k < grid.nz(); ++k)
-	// 		for (int j = 0; j < grid.ny(); ++j)
-	// 		for (int i = 0; i < grid.nx(); ++i) {
-	// 			const Real rho = U(i,j,k, HydroSystem<DiskGalaxy_no_mhd>::density_index);
-	// 			const Real mx  = U(i,j,k, HydroSystem<DiskGalaxy_no_mhd>::x1Momentum_index);
-	// 			const Real my  = U(i,j,k, HydroSystem<DiskGalaxy_no_mhd>::x2Momentum_index);
-	// 			const Real mz  = U(i,j,k, HydroSystem<DiskGalaxy_no_mhd>::x3Momentum_index);
-				
-	// 			const Real vx = mx / rho;
-	// 			const Real vy = my / rho;
-	// 			const Real vz = mz / rho;
-	// 		}
-	// 	}
-	// }
+			const amrex::Box &indexRange = grid_elem.indexRange_;
+			const amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> dx = grid_elem.dx_;
+			const amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> prob_lo = grid_elem.prob_lo_;
+			// const amrex::Array4<double> &state_cc = grid_elem.array_;
+			
+			amrex::Print() << "REDJARD: level = " << level << "\n";
+			amrex::Print() << "REDJARD: iter.index() = " << iter.index() << "\n";
+			amrex::Print() << "REDJARD: prob_lo = [" << prob_lo[0] << ", " << prob_lo[1] << ", " << prob_lo[2] << "]\n";
+			amrex::Print() << "REDJARD: dx = [" << dx[0] << ", " << dx[1] << ", " << dx[2] << "]\n";
+		}
+	}
 }
 template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::computeAfterTimestep() {
 	apply_dm_potential(this);
 }
+// template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::calculateGpotAllLevels() {
+// 	amrex::Print() << "REDJARD: calling calculateGpotAllLevels\n";
+// 	((AMRSimulation<DiskGalaxy_no_mhd>*)this)->calculateGpotAllLevels();
+// 	amrex::Print() << "REDJARD: called calculateGpotAllLevels\n";
+// }
 
 auto problem_main() -> int
 {
