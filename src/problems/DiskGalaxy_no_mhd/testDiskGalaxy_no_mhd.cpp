@@ -510,52 +510,45 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::refineGrid(int lev, amrex:
 	// amrex::Print() << "REDJARD: ran refineGrid in " << float(clock() - start)/1e6 << " s\n";
 }
 
-void apply_dm_potential_on_grid( quokka::grid const &grid_elem, amrex::Real dt ) {
-	// const amrex::Box &indexRange = grid_elem.indexRange_;
+void apply_dm_potential_on_grid( quokka::grid const &grid_elem, amrex::Real Δt ) {
+	const amrex::Box &indexRange = grid_elem.indexRange_;
 	const amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> dx = grid_elem.dx_;
 	const amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> prob_lo = grid_elem.prob_lo_;
-	// const amrex::Array4<double> &state = grid_elem.array_;
+	const amrex::Array4<double> &state = grid_elem.array_;
 	
-	// amrex::Print() << "REDJARD: level = " << level << "\n";
-	// amrex::Print() << "REDJARD: iter.index() = " << iter.index() << "\n";
-	amrex::Print() << "REDJARD: prob_lo = [" << prob_lo[0] << ", " << prob_lo[1] << ", " << prob_lo[2] << "]\n";
-	amrex::Print() << "REDJARD: dx = [" << dx[0] << ", " << dx[1] << ", " << dx[2] << "]\n";
-	
-	/*
-	// taken from lizmcole/MHDDisk
-	amrex::ParallelFor(indexRange, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+	// based on lizmcole/MHDDisk's addStrangSplitSources
+	amrex::ParallelFor(indexRange, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
 		const double x = prob_lo[0] + (i + 0.5) * dx[0];
 		const double y = prob_lo[1] + (j + 0.5) * dx[1];
 		const double z = prob_lo[2] + (k + 0.5) * dx[2];
-		const double R2 = x * x + y * y;
-		const double R = std::sqrt(R2);
+		const double r2 = x*x + y*y + z*z;
+		const double r = std::sqrt(r2);
 		
-		const double rho = state(i, j, k, HydroSystem<MHDGalaxy>::density_index);
-		const double px = state(i, j, k, HydroSystem<MHDGalaxy>::x1Momentum_index);
-		const double py = state(i, j, k, HydroSystem<MHDGalaxy>::x2Momentum_index);
-		const double pz = state(i, j, k, HydroSystem<MHDGalaxy>::x3Momentum_index);
-		const double Eint = state(i, j, k, HydroSystem<MHDGalaxy>::internalEnergy_index);
-		const double Etot_old = state(i, j, k, HydroSystem<MHDGalaxy>::energy_index);
-		const double Ekin_old = 0.5 * (px * px + py * py + pz * pz) / rho;
-		const double Emag = Etot_old - Ekin_old - Eint;
+		const double ρ = state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::density_index);
+		const double px = state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::x1Momentum_index);
+		const double py = state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::x2Momentum_index);
+		const double pz = state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::x3Momentum_index);
+		const double Eint = state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::internalEnergy_index);
 		
-		const double D = R2 + Rc * Rc + (z / q_flatten) * (z / q_flatten);
-		const double g_R = (R > 0.0) ? -(vc * vc * R / D) : 0.0;
-		const double g_z = -(vc * vc * z / (q_flatten * q_flatten * D));
-		const double gx = (R > 0.0) ? g_R * x / R : 0.0;
-		const double gy = (R > 0.0) ? g_R * y / R : 0.0;
+		const double dm_mass = 250e9 * C::M_solar;  // 250 billion solar masses
+		const double dm_dist =  40e3 * C::parsec;   // at 40kpc out
+		const double enclosed_mass = dm_mass * r/dm_dist;
+		const double g_r = enclosed_mass * Physics_Traits<DiskGalaxy_no_mhd>::gravitational_constant / (r*r);  // M⸱G/r²
 		
-		const double px_new = px + dt_lev * rho * gx;
-		const double py_new = py + dt_lev * rho * gy;
-		const double pz_new = pz + dt_lev * rho * g_z;
-		const double Ekin_new = 0.5 * (px_new * px_new + py_new * py_new + pz_new * pz_new) / rho;
+		const double gx = g_r * x/r;
+		const double gy = g_r * y/r;
+		const double gz = g_r * z/r;
 		
-		state(i, j, k, HydroSystem<MHDGalaxy>::x1Momentum_index) = px_new;
-		state(i, j, k, HydroSystem<MHDGalaxy>::x2Momentum_index) = py_new;
-		state(i, j, k, HydroSystem<MHDGalaxy>::x3Momentum_index) = pz_new;
-		state(i, j, k, HydroSystem<MHDGalaxy>::energy_index) = Ekin_new + Eint + Emag;
+		const double px_new = px + Δt * ρ * gx;
+		const double py_new = py + Δt * ρ * gy;
+		const double pz_new = pz + Δt * ρ * gz;
+		const double Ekin_new = 0.5 * (px_new*px_new + py_new*py_new + pz_new*pz_new) / ρ;
+		
+		state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::x1Momentum_index) = px_new;
+		state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::x2Momentum_index) = py_new;
+		state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::x3Momentum_index) = pz_new;
+		state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::energy_index) = Ekin_new + Eint;
 	});
-	//*/
 }
 
 template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::addStrangSplitSources(amrex::MultiFab &mf, int level, amrex::Real /*time*/, amrex::Real dt_lev) {
