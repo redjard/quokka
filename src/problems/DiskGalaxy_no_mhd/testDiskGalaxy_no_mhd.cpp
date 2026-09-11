@@ -78,10 +78,6 @@ template <> struct Physics_Traits<DiskGalaxy_no_mhd> : DefaultPhysicsTraits {
 	// static constexpr bool is_mhd_enabled = true;
 };
 
-template <> struct Particle_Traits<DiskGalaxy_no_mhd> : DefaultParticleTraits {
-	static constexpr ParticleSwitch particle_switch = ParticleSwitch::CIC;
-};
-
 template <> struct SimulationData<DiskGalaxy_no_mhd> { // userData_
 	amrex::Real r_inner{};
 	amrex::Real r_outer{};
@@ -100,12 +96,19 @@ template <> struct SimulationData<DiskGalaxy_no_mhd> { // userData_
 	amrex::Gpu::PinnedVector<amrex::Real> rho_halo;
 	amrex::Gpu::PinnedVector<amrex::Real> velr_halo;
 	amrex::Gpu::PinnedVector<amrex::Real> temp_halo;
+	
+	amrex::Real length_factor{};
+	amrex::Real speed_factor{};
+	// amrex::Real halo_density_factor{};
+	amrex::Real dm_mass{};
+	amrex::Real dm_dist{};
 
 	std::string haloVphiExpr;
 	bool useHaloVphiParser = false;
 	std::optional<amrex::Parser> haloVphiParser;
 	std::optional<amrex::ParserExecutor<5>> haloVphiParserExe;
 };
+SimulationData<DiskGalaxy_no_mhd>* userData;  // behold the jank —— this points to QuokkaSimulation<>->userData_, for functions that aren't under QuokkaSimulation<>
 
 
 template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::preCalculateInitialConditions()
@@ -121,6 +124,12 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::preCalculateInitialConditi
 	pp.query("speed_factor", speed_factor);
 	double halo_density_factor = 1.0;
 	pp.query("halo_density_factor", halo_density_factor);
+	double dm_mass_Msun = NAN;
+	pp.query("dm_mass_Msun", dm_mass_Msun);
+	AMREX_ALWAYS_ASSERT(!std::isnan(dm_mass_Msun));
+	double dm_dist_kpc = NAN;
+	pp.query("dm_dist_kpc", dm_dist_kpc);
+	AMREX_ALWAYS_ASSERT(!std::isnan(dm_dist_kpc));
 
 	auto halo_table = quokka::DataTable<1, 4, quokka::OutOfBounds::clamp>::CSVReader(filename, quokka::TransformType::linear);
 	auto const halo_table_const = halo_table.const_tables_host();
@@ -135,6 +144,7 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::preCalculateInitialConditi
 	userData_.rho_halo.resize(N);
 	userData_.velr_halo.resize(N);
 	userData_.temp_halo.resize(N);
+	userData = &userData_;
 
 	const double length_unit = 1.0e3 * C::parsec * length_factor; // kpc
 	const double vel_unit = 1.0e5 * speed_factor; // km/s
@@ -146,7 +156,13 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::preCalculateInitialConditi
 		userData_.velr_halo[i] = halo_table_const.dataViewArrays[2](static_cast<int>(i)) * speed_factor;
 		userData_.temp_halo[i] = halo_table_const.dataViewArrays[3](static_cast<int>(i));
 	}
-
+	
+	userData_.length_factor = length_factor;
+	userData_.speed_factor  = speed_factor;
+	// userData_.halo_density_factor = halo_density_factor;
+	userData_.dm_mass       = dm_mass_Msun * C::M_solar * length_factor*length_factor*length_factor;
+	userData_.dm_dist       = dm_dist_kpc * length_unit;
+	
 	// save min/max radii
 	userData_.r_inner = halo_table_const.coord_min[0] * length_unit;
 	userData_.vcirc_inner = halo_table_const.dataViewArrays[0](0) * vel_unit;
@@ -204,12 +220,8 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::setInitialConditionsOnGrid
 	AMREX_ALWAYS_ASSERT(!std::isnan(disk_perturb_amplitude));
 	AMREX_ALWAYS_ASSERT(!std::isnan(disk_perturb_Rmax_kpc));
 	
-	double length_factor = 1.0;
-	pp.query("length_factor", length_factor);
-	double speed_factor = 1.0;
-	pp.query("speed_factor", speed_factor);
-	// double halo_density_factor = 1.0;
-	// pp.query("halo_density_factor", halo_density_factor);
+	double length_factor = userData_.length_factor;
+	double speed_factor  = userData_.speed_factor;
 	
 	disk_Rscale_kpc *= length_factor;
 	disk_zscale_kpc *= length_factor;
@@ -439,20 +451,6 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::setInitialConditionsOnGrid
 	});
 }
 
-template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::createInitialCICParticles()
-{
-	// read particles from ASCII file
-	amrex::ParmParse const pp("disk_galaxy");
-	std::string filename;
-	pp.query("particle_file", filename);
-
-	amrex::Print() << "\nReading particles from ASCII file " << filename << "...\n";
-	CICParticles->SetVerbose(1);
-	const int nreal_extra = 4; // mass vx vy vz
-	CICParticles->InitFromAsciiFile(filename, nreal_extra, nullptr);
-	amrex::Print() << "\n";
-}
-
 template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::refineGrid(int lev, amrex::TagBoxArray &tags, amrex::Real _time, int _ngrow)
 {
 	// amrex::Print() << "refineGrid\n";
@@ -516,6 +514,9 @@ void apply_dm_potential_on_grid( quokka::grid const &grid_elem, amrex::Real Δt 
 	const amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> prob_lo = grid_elem.prob_lo_;
 	const amrex::Array4<double> &state = grid_elem.array_;
 	
+	auto dm_mass = userData->dm_mass;
+	auto dm_dist = userData->dm_dist;
+	
 	// based on lizmcole/MHDDisk's addStrangSplitSources
 	amrex::ParallelFor(indexRange, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
 		const double x = prob_lo[0] + (i + 0.5) * dx[0];
@@ -530,10 +531,8 @@ void apply_dm_potential_on_grid( quokka::grid const &grid_elem, amrex::Real Δt 
 		const double pz = state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::x3Momentum_index);
 		const double Eint = state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::internalEnergy_index);
 		
-		const double dm_mass = 250e9 * C::M_solar;  // 250 billion solar masses
-		const double dm_dist =  40e3 * C::parsec;   // at 40kpc out
 		const double enclosed_mass = dm_mass * r/dm_dist;
-		const double g_r = enclosed_mass * Physics_Traits<DiskGalaxy_no_mhd>::gravitational_constant / (r*r);  // M⸱G/r²
+		const double g_r = - enclosed_mass * Physics_Traits<DiskGalaxy_no_mhd>::gravitational_constant / (r*r);  // M⸱G/r²
 		
 		const double gx = g_r * x/r;
 		const double gy = g_r * y/r;
