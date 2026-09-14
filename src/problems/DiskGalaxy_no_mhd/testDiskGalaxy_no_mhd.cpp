@@ -100,8 +100,9 @@ template <> struct SimulationData<DiskGalaxy_no_mhd> { // userData_
 	amrex::Real length_factor{};
 	amrex::Real speed_factor{};
 	// amrex::Real halo_density_factor{};
-	amrex::Real dm_mass{};
+	amrex::Real dm_mass_fraction{};
 	amrex::Real dm_dist{};
+	amrex::Real gal_center_lowgrav_radius{};
 
 	std::string haloVphiExpr;
 	bool useHaloVphiParser = false;
@@ -124,12 +125,12 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::preCalculateInitialConditi
 	pp.query("speed_factor", speed_factor);
 	double halo_density_factor = 1.0;
 	pp.query("halo_density_factor", halo_density_factor);
-	double dm_mass_Msun = NAN;
-	pp.query("dm_mass_Msun", dm_mass_Msun);
-	AMREX_ALWAYS_ASSERT(!std::isnan(dm_mass_Msun));
-	double dm_dist_kpc = NAN;
-	pp.query("dm_dist_kpc", dm_dist_kpc);
-	AMREX_ALWAYS_ASSERT(!std::isnan(dm_dist_kpc));
+	double dm_mass_fraction = NAN;
+	pp.query("dm_mass_fraction", dm_mass_fraction);
+	AMREX_ALWAYS_ASSERT(!std::isnan(dm_mass_fraction));
+	double gal_center_lowgrav_radius_kpc = NAN;
+	pp.query("gal_center_lowgrav_radius_kpc", gal_center_lowgrav_radius_kpc);
+	AMREX_ALWAYS_ASSERT(!std::isnan(gal_center_lowgrav_radius_kpc));
 
 	auto halo_table = quokka::DataTable<1, 4, quokka::OutOfBounds::clamp>::CSVReader(filename, quokka::TransformType::linear);
 	auto const halo_table_const = halo_table.const_tables_host();
@@ -146,31 +147,31 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::preCalculateInitialConditi
 	userData_.temp_halo.resize(N);
 	userData = &userData_;
 
-	const double length_unit = 1.0e3 * C::parsec * length_factor; // kpc
+	const double kpc_unit = 1.0e3 * C::parsec * length_factor; // kpc
 	const double vel_unit = 1.0e5 * speed_factor; // km/s
 	for (size_t i = 0; i < N; ++i) {
 		amrex::Real const radius = halo_table_const.coord_min[0] + static_cast<amrex::Real>(i) * halo_table_const.dcoord[0];
-		userData_.radius[i] = radius * length_unit;
+		userData_.radius[i] = radius * kpc_unit;
 		userData_.vcirc[i] = halo_table_const.dataViewArrays[0](static_cast<int>(i)) * vel_unit;
 		userData_.rho_halo[i] = halo_table_const.dataViewArrays[1](static_cast<int>(i)) * halo_density_factor;
 		userData_.velr_halo[i] = halo_table_const.dataViewArrays[2](static_cast<int>(i)) * speed_factor;
 		userData_.temp_halo[i] = halo_table_const.dataViewArrays[3](static_cast<int>(i));
 	}
 	
-	userData_.length_factor = length_factor;
-	userData_.speed_factor  = speed_factor;
-	// userData_.halo_density_factor = halo_density_factor;
-	userData_.dm_mass       = dm_mass_Msun * C::M_solar * length_factor*length_factor*length_factor;
-	userData_.dm_dist       = dm_dist_kpc * length_unit;
+	userData_.length_factor             = length_factor;
+	userData_.speed_factor              = speed_factor;
+	// userData_.halo_density_factor       = halo_density_factor;
+	userData_.dm_mass_fraction          = dm_mass_fraction;
+	userData_.gal_center_lowgrav_radius = gal_center_lowgrav_radius_kpc * kpc_unit;
 	
 	// save min/max radii
-	userData_.r_inner = halo_table_const.coord_min[0] * length_unit;
+	userData_.r_inner = halo_table_const.coord_min[0] * kpc_unit;
 	userData_.vcirc_inner = halo_table_const.dataViewArrays[0](0) * vel_unit;
 	userData_.rho_inner = halo_table_const.dataViewArrays[1](0) * halo_density_factor;
 	userData_.velr_inner = halo_table_const.dataViewArrays[2](0) * speed_factor;
 	userData_.temp_inner = halo_table_const.dataViewArrays[3](0);
 
-	userData_.r_outer = halo_table_const.coord_max[0] * length_unit;
+	userData_.r_outer = halo_table_const.coord_max[0] * kpc_unit;
 	userData_.vcirc_outer = halo_table_const.dataViewArrays[0](static_cast<int>(N - 1)) * vel_unit;
 	userData_.rho_outer = halo_table_const.dataViewArrays[1](static_cast<int>(N - 1)) * halo_density_factor;
 	userData_.velr_outer = halo_table_const.dataViewArrays[2](static_cast<int>(N - 1)) * speed_factor;
@@ -361,8 +362,12 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::setInitialConditionsOnGrid
 
 		auto rhoDisk_exact = [rho_0, R_d, z_d, disk_perturb_amplitude, R_max_perturb](double x, double y, double z) {
 			double const R = std::sqrt(std::pow(x, 2) + std::pow(y, 2));
+			// double const R_scaled = R / R_d;
+			// double const lerp_t = std::min(4*R_scaled, 1.);
+			// double const Rdist_smoothed = std::lerp( std::exp(-4*R_scaled*R_scaled), std::exp(-R_scaled), lerp_t );
 			double const theta = std::atan2(x, y);
 			double const drho_over_rho = disk_perturb_amplitude * jn(2, 5.1356 * R / R_max_perturb) * std::sin(2.0 * theta);
+			// return rho_0 * Rdist_smoothed * std::exp(-std::abs(z) / z_d) * (1.0 + drho_over_rho);
 			return rho_0 * std::exp(-R / R_d) * std::exp(-std::abs(z) / z_d) * (1.0 + drho_over_rho);
 		};
 
@@ -458,8 +463,10 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::refineGrid(int lev, amrex:
 	// geometrical refinement
 	// tag cells within the cylinder defined by R < Rmax and abs(z) < zmax
 	amrex::ParmParse const pp("disk_galaxy");
+	amrex::Real refine_Rmin_kpc = NAN;
 	amrex::Real refine_Rmax_kpc = NAN;
 	amrex::Real refine_zmax_kpc = NAN;
+	pp.query("refine_Rmin_kpc", refine_Rmin_kpc);
 	pp.query("refine_Rmax_kpc", refine_Rmax_kpc);
 	pp.query("refine_zmax_kpc", refine_zmax_kpc);
 	
@@ -468,9 +475,11 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::refineGrid(int lev, amrex:
 	// double speed_factor = 1.0;
 	// pp.query("speed_factor", speed_factor);
 	
+	refine_Rmin_kpc *= length_factor;
 	refine_Rmax_kpc *= length_factor;
 	refine_zmax_kpc *= length_factor;
 	
+	const amrex::Real refine_Rmin = refine_Rmin_kpc * (1.0e3 * C::parsec);
 	const amrex::Real refine_Rmax = refine_Rmax_kpc * (1.0e3 * C::parsec);
 	const amrex::Real refine_zmax = refine_zmax_kpc * (1.0e3 * C::parsec);
 
@@ -491,7 +500,7 @@ template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::refineGrid(int lev, amrex:
 
 		auto tagIfPointInRegion = [=](amrex::Real x, amrex::Real y, amrex::Real z) {
 			amrex::Real const R = std::sqrt(x * x + y * y);
-			if ((R < refine_Rmax) && (std::abs(z) < refine_zmax)) {
+			if ((R >= refine_Rmin) && (R < refine_Rmax) && (std::abs(z) < refine_zmax)) {
 				tag[bx](i, j, k) = amrex::TagBox::SET;
 			}
 		};
@@ -514,16 +523,19 @@ void apply_dm_potential_on_grid( quokka::grid const &grid_elem, amrex::Real Δt 
 	const amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> prob_lo = grid_elem.prob_lo_;
 	const amrex::Array4<double> &state = grid_elem.array_;
 	
-	auto dm_mass = userData->dm_mass;
-	auto dm_dist = userData->dm_dist;
+	auto dm_mass_fraction = userData->dm_mass_fraction;
+	auto Rc = userData->gal_center_lowgrav_radius;
+	double const *R_table = userData->radius.dataPtr();
+	double const *vcirc_table = userData->vcirc.dataPtr();
+	auto const len_table = static_cast<int>(userData->radius.size());
 	
 	// based on lizmcole/MHDDisk's addStrangSplitSources
 	amrex::ParallelFor(indexRange, [=] AMREX_GPU_DEVICE(int i, int j, int k) {
 		const double x = prob_lo[0] + (i + 0.5) * dx[0];
 		const double y = prob_lo[1] + (j + 0.5) * dx[1];
 		const double z = prob_lo[2] + (k + 0.5) * dx[2];
-		const double r2 = x*x + y*y + z*z;
-		const double r = std::sqrt(r2);
+		// const double r = std::sqrt(x*x + y*y + z*z);
+		const double r = std::sqrt(x*x + y*y + z*z + Rc*Rc);  // spherical radius but minimum Rc (default 2kpc)
 		
 		const double ρ = state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::density_index);
 		const double px = state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::x1Momentum_index);
@@ -531,8 +543,11 @@ void apply_dm_potential_on_grid( quokka::grid const &grid_elem, amrex::Real Δt 
 		const double pz = state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::x3Momentum_index);
 		const double Eint = state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::internalEnergy_index);
 		
-		const double enclosed_mass = dm_mass * r/dm_dist;
-		const double g_r = - enclosed_mass * Physics_Traits<DiskGalaxy_no_mhd>::gravitational_constant / (r*r);  // M⸱G/r²
+		// const double enclosed_mass = dm_mass * r/dm_dist;
+		const double vcirc = interpolate_value(r, R_table, vcirc_table, len_table);
+		// const double g_r = - enclosed_mass * Physics_Traits<DiskGalaxy_no_mhd>::gravitational_constant / (r*r);  // M⸱G/r²
+		double g_r = - vcirc*vcirc/r;  // centripedal accel: a = v²/r —— we counter that
+		g_r *= dm_mass_fraction;  // dm does ratio dm_mass_fraction of the work, gas mass (1-dm_mass_fraction), usually ~ 97% vs 3%
 		
 		const double gx = g_r * x/r;
 		const double gy = g_r * y/r;
@@ -547,6 +562,18 @@ void apply_dm_potential_on_grid( quokka::grid const &grid_elem, amrex::Real Δt 
 		state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::x2Momentum_index) = py_new;
 		state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::x3Momentum_index) = pz_new;
 		state(i, j, k, HydroSystem<DiskGalaxy_no_mhd>::energy_index) = Ekin_new + Eint;
+		
+		
+		// lizs code
+		// constexpr double Rc = 2.0 * 1.0e3 * C::parsec;  // 2 kpc
+		// constexpr double q_flatten = 0.7;
+		
+		// const double D = std::sqrt( Rc * Rc + x * x + y * y + (z / q_flatten) * (z / q_flatten) );
+		// const double g_R = - vc*vc/D;
+		// const double g_z = - (vc/q_flatten)*(vc/q_flatten)/D;
+		// const double gz = g_z * z / D;
+		// const double gx = g_R * x / D;
+		// const double gy = g_R * y / D;
 	});
 }
 
