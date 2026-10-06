@@ -919,7 +919,8 @@ template <typename problem_t> void QuokkaSimulation<problem_t>::printCellPropert
 		const amrex::Real P = ::quokka::EOS<problem_t>::ComputePressure(rho, Eint);
 		const amrex::Real cs = ::quokka::EOS<problem_t>::ComputeSoundSpeed(rho, P);
 
-		amrex::AllPrint() << std::format("...[level {}] \tcell density = {:e}, |v| = {:e}, cs = {:e}\n", lev, rho, vel_mag, cs);
+		// amrex::AllPrint() << std::format("...[level {}] \tcell density = {:e}, |v| = {:e}, cs = {:e}\n", lev, rho, vel_mag, cs);
+		amrex::Print() << std::format("ρ = {:.3e}, |v| = {:.3e}, cs = {:.3e}", rho, vel_mag, cs);
 	}
 }
 

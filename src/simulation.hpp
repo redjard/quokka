@@ -123,7 +123,7 @@ inline auto formatIntVect(amrex::IntVect const &iv) -> std::string
 #elif AMREX_SPACEDIM == 2
 	return std::format("({}, {})", iv[0], iv[1]);
 #else
-	return std::format("({}, {}, {})", iv[0], iv[1], iv[2]);
+	return std::format("({:3}, {:3}, {:3})", iv[0], iv[1], iv[2]);
 #endif
 }
 
@@ -1260,10 +1260,11 @@ template <typename problem_t> auto AMRSimulation<problem_t>::computeTimestepAtLe
 	dtloc_t hydro_dt{.value = cflNumber_ * (dx_min / domain_signal_max), .index = domain_signal_maxloc};
 
 	if (verbose) {
-		amrex::Print() << std::format("...[level {}] estimated hydro timestep: {:e}\n", lev, hydro_dt.value);
-		amrex::Print() << std::format("...[level {}] \thydro timestep limited at cell {} with signal speed = {:e}\n", lev,
-					      formatIntVect(hydro_dt.index), domain_signal_max);
+		amrex::Print() << std::format("lvl {} {} has dt {:e} (", lev, formatIntVect(hydro_dt.index), hydro_dt.value);
+		// amrex::Print() << std::format("...[level {}] \thydro timestep limited at cell {} with signal speed = {:e}\n", lev,
+		// 			      formatIntVect(hydro_dt.index), domain_signal_max);
 		printCellProperties(lev, hydro_dt.index);
+		amrex::Print() << ")\n";
 	}
 
 	// compute timestep based on conduction parameters
@@ -1315,7 +1316,7 @@ template <typename problem_t> auto AMRSimulation<problem_t>::computeTimestepAtLe
 	if (verbose) {
 		// print the physics that limits the timestep
 		if (dt_min_ptr == &hydro_dt) {
-			amrex::Print() << std::format("...[level {}] timestep limited by HYDRO\n", lev);
+			// amrex::Print() << std::format("...[level {}] timestep limited by HYDRO\n", lev);
 		} else if (dt_min_ptr == &particle_dt) {
 			amrex::Print() << std::format("...[level {}] timestep limited by PARTICLES\n", lev);
 		} else if (dt_min_ptr == &conduction_dt) {
@@ -1395,6 +1396,12 @@ template <typename problem_t> void AMRSimulation<problem_t>::computeTimestep()
 	if (tNew_[0] + dt_0 > stopTime_ - eps) {
 		dt_0 = stopTime_ - tNew_[0];
 	}
+	
+	// amrex::Print() << "dt[" << level_that_sets_dt_0 << "]: " << std::setprecision(3) << dt_0 << "\n";
+	amrex::Print() << std::format("dt = {:.2e}, ", dt_0);
+	auto real_verbose = verbose; verbose = 1;
+		computeTimestepAtLevel(level_that_sets_dt_0);
+	verbose = real_verbose;
 
 	// assign timesteps on each level
 	dt_[0] = dt_0;
@@ -1402,6 +1409,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::computeTimestep()
 	for (int level = 1; level <= finest_level; ++level) {
 		dt_[level] = dt_[level - 1] / nsubsteps[level];
 	}
+	
 }
 
 template <typename problem_t> auto AMRSimulation<problem_t>::getWalltime() -> amrex::Real
@@ -1473,7 +1481,8 @@ template <typename problem_t> void AMRSimulation<problem_t>::evolve()
 		if (suppress_output == 0) {
 			if (amrex::Verbose())
 				amrex::Print() << "\n";
-			amrex::Print() << "Coarse STEP " << step + 1 << " at t = " << cur_time << " (" << (cur_time / stopTime_) * 100. << "%) starts ";
+			// amrex::Print() << "Coarse STEP " << step + 1 << " at t = " << cur_time << " (" << (cur_time / stopTime_) * 100. << "%) starts ";
+			amrex::Print() << std::format("{:4} ({:7.4f}%): ",step,(cur_time / stopTime_) * 100.);
 		}
 
 		amrex::ParallelDescriptor::Barrier(); // synchronize all MPI ranks
@@ -1484,7 +1493,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::evolve()
 				amrex::Real elapsed_sec = getCycleWalltime();
 				amrex::Print() << "(cycle time: " << elapsed_sec << " s) ...\n";
 			} else {
-				amrex::Print() << "...\n";
+				// amrex::Print() << "...\n";
 			}
 		}
 

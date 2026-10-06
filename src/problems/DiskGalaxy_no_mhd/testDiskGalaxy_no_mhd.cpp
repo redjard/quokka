@@ -578,6 +578,7 @@ void apply_dm_potential_on_grid( quokka::grid const &grid_elem, amrex::Real Δt 
 }
 
 template <> void QuokkaSimulation<DiskGalaxy_no_mhd>::addStrangSplitSources(amrex::MultiFab &mf, int level, amrex::Real /*time*/, amrex::Real dt_lev) {
+	// for (int level = 0; level <= sim->finestLevel(); ++level)
 	// iterate over all grids (of this MultiFab)
 	for (amrex::MFIter iter(mf); iter.isValid(); ++iter) {
 		quokka::grid grid_elem(
@@ -610,6 +611,5 @@ auto problem_main() -> int
 	// evolve
 	sim.evolve();
 
-	const int status = 0;
-	return status;
+	return 0;
 }
