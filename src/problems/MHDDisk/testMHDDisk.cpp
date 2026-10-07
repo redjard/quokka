@@ -79,6 +79,7 @@ template <> struct SimulationData<MHDGalaxy> {
 	amrex::Real Rc{};
 	amrex::Real Rd{};
 	amrex::Real Rmax{};
+	amrex::Real Rcutoff{};
 	amrex::Real Q_mean{};
 	amrex::Real Mc{};
 	amrex::Real vc{};
@@ -396,6 +397,7 @@ template <> void QuokkaSimulation<MHDGalaxy>::preCalculateInitialConditions()
 	pp.get("Rc_kpc", userData_.Rc);  userData_.Rc *= 1.0e3 * C::parsec;
 	pp.get("Rd_kpc", userData_.Rd);  userData_.Rd *= 1.0e3 * C::parsec;
 	pp.get("Rmax_kpc", userData_.Rmax);  userData_.Rmax *= 1.0e3 * C::parsec;
+	pp.get("Rcutoff_kpc", userData_.Rcutoff);  userData_.Rcutoff *= 1.0e3 * C::parsec;
 	pp.get("Mc", userData_.Mc);
 	pp.get("Q_mean", userData_.Q_mean);
 	pp.query("sn_jeans_J", userData_.sn_jeans_J);
@@ -589,6 +591,7 @@ template <> void QuokkaSimulation<MHDGalaxy>::setInitialConditionsOnGrid(quokka:
 	const double Mc = userData_.Mc;
 	const double Rc = userData_.Rc;
 	const double Rd = userData_.Rd;
+	const double Rcutoff = userData_.Rcutoff;
 	const double Sigma0 = userData_.Sigma0;
 	const double cs_disk = quokka::EOS_Traits<MHDGalaxy>::cs_disk;
 	const double cs_cgm = quokka::EOS_Traits<MHDGalaxy>::cs_cgm;
@@ -684,7 +687,7 @@ template <> void QuokkaSimulation<MHDGalaxy>::setInitialConditionsOnGrid(quokka:
 		const double z = prob_lo[2] + (k + (c + 0.5)/double(supersample)) * dx[2];
 		const double R = std::sqrt(x * x + y * y + 1e-200);
 
-		const double rho_disc_raw = diskDensityAnalytic(R, z, Rc, Rd, Sigma0, Mc, cs_disk);
+		const double rho_disc_raw = R < Rcutoff ? diskDensityAnalytic(R, z, Rc, Rd, Sigma0, Mc, cs_disk) : 0.0;
 		const bool in_disk = (rho_disc_raw > rho_transition);
 		const double rho = in_disk ? amrex::max(rho_disc_raw, rho_transition * 1e-6) : rho_cgm;
 		const double cs = in_disk ? cs_disk : cs_cgm;
@@ -983,6 +986,7 @@ template <> void QuokkaSimulation<MHDGalaxy>::refineGrid(int lev, amrex::TagBoxA
 	amrex::Real refine_Hcyl; pp.get("refine_Hcyl_kpc",                  refine_Hcyl); refine_Hcyl *= 1.0e3 * C::parsec;
 	amrex::Real shrink_Rcyl; pp.get("refine_Rcyl_shrink_per_level_kpc", shrink_Rcyl); shrink_Rcyl *= 1.0e3 * C::parsec;
 	amrex::Real shrink_Hcyl; pp.get("refine_Hcyl_shrink_per_level_kpc", shrink_Hcyl); shrink_Hcyl *= 1.0e3 * C::parsec;
+	amrex::Real Rcyl_inner;  pp.get("refine_Rcyl_inner_kpc",            Rcyl_inner ); Rcyl_inner  *= 1.0e3 * C::parsec;
 
 	// Shrink the refinement cylinder at each successive level, floored at 30% of the
 	// base size, so finer levels progressively focus on the disk core instead of all
@@ -990,7 +994,7 @@ template <> void QuokkaSimulation<MHDGalaxy>::refineGrid(int lev, amrex::TagBoxA
 	shrink_Rcyl *= lev;
 	shrink_Hcyl *= lev;
 
-	const amrex::Real Rcyl_lev = amrex::max(refine_Rcyl - shrink_Rcyl, 0.3 * refine_Rcyl);
+	const amrex::Real Rcyl_lev = amrex::max(refine_Rcyl - shrink_Rcyl, 0.3 * refine_Rcyl, Rcyl_inner);
 	const amrex::Real Hcyl_lev = amrex::max(refine_Hcyl - shrink_Hcyl, 0.3 * refine_Hcyl);
 
 	amrex::ParallelFor(tags, [=] AMREX_GPU_DEVICE(int bx, int i, int j, int k) noexcept {
@@ -1021,7 +1025,8 @@ template <> void QuokkaSimulation<MHDGalaxy>::refineGrid(int lev, amrex::TagBoxA
 		// }
 
 		auto tagIfInRegion = [=](amrex::Real x, amrex::Real y, amrex::Real z) {
-			if (std::sqrt(x * x + y * y) < Rcyl_lev && std::abs(z) < Hcyl_lev) {
+			const auto R = std::sqrt(x * x + y * y);
+			if (Rcyl_inner <= R && R < Rcyl_lev && std::abs(z) < Hcyl_lev) {
 				tag[bx](i, j, k) = amrex::TagBox::SET;
 			}
 		};
