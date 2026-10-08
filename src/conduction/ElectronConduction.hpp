@@ -82,7 +82,7 @@ template <typename problem_t> class ElectronConduction
 
 		amrex::ParallelFor(state, ng, [=] AMREX_GPU_DEVICE(int bx, int i, int j, int k) noexcept {
 			std::array<amrex::Array4<const amrex::Real>, AMREX_SPACEDIM> local_state_fc{};
-			if (Physics_Traits<problem_t>::is_mhd_enabled_b) {
+			if (Physics_Traits<problem_t>::is_mhd_enabled) {
 				local_state_fc[0] = state_fc_x0[bx];
 #if AMREX_SPACEDIM >= 2
 				local_state_fc[1] = state_fc_x1[bx];
@@ -171,7 +171,7 @@ template <typename problem_t> class ElectronConduction
 
 		amrex::ParallelFor(state, [=] AMREX_GPU_DEVICE(int bx, int i, int j, int k) noexcept {
 			std::array<amrex::Array4<const amrex::Real>, AMREX_SPACEDIM> local_state_fc{};
-			if (Physics_Traits<problem_t>::is_mhd_enabled_b) {
+			if (Physics_Traits<problem_t>::is_mhd_enabled) {
 				local_state_fc[0] = state_fc_x0[bx];
 #if AMREX_SPACEDIM >= 2
 				local_state_fc[1] = state_fc_x1[bx];

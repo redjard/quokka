@@ -91,9 +91,6 @@ template <> struct Physics_Traits<MHDGalaxy> : DefaultPhysicsTraits {
 #ifdef do_MHD
 	static constexpr bool is_mhd_enabled = true;
 #endif  // do_MHD
-	static constexpr bool is_mhd_enabled = false;
-	static constexpr bool is_mhd_enabled_a = true;
-	static constexpr bool is_mhd_enabled_b = false;
 };
 
 template <> struct SimulationData<MHDGalaxy> {
@@ -1780,22 +1777,9 @@ auto problem_main() -> int
 	QuokkaSimulation<MHDGalaxy> sim(BCs_cc, BCs_fc);
 #else  // do_MHD
 	// QuokkaSimulation<MHDGalaxy> sim;
-	// auto BCs_cc = quokka::BC<MHDGalaxy>(quokka::BCType::foextrap);
-	// QuokkaSimulation<MHDGalaxy> sim(BCs_cc);
+	auto BCs_cc = quokka::BC<MHDGalaxy>(quokka::BCType::foextrap);
+	QuokkaSimulation<MHDGalaxy> sim(BCs_cc);
 #endif  // do_MHD
-	
-	auto BCs_cc = quokka::BC<MHDGalaxy>(quokka::BCType::reflecting);
-
-	amrex::Vector<amrex::BCRec> BCs_fc(3);
-	for (int icomp = 0; icomp < 3; ++icomp) {
-		for (int idim = 0; idim < 3; ++idim) {
-			BCs_fc[icomp].setLo(idim, amrex::BCType::reflect_even);
-			BCs_fc[icomp].setHi(idim, amrex::BCType::reflect_even);
-		}
-	}
-
-	QuokkaSimulation<MHDGalaxy> sim(BCs_cc, BCs_fc);
-	
 	sim.preCalculateInitialConditions();
 	sim.setInitialConditions();
 	sim.evolve();

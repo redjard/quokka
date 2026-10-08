@@ -218,7 +218,7 @@ AMREX_GPU_HOST_DEVICE auto DustSources<problem_t>::BuildCellCenteredMagneticFiel
     -> Vec3
 {
 	Vec3 B = Vec3::Zero();
-	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
+	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
 		AMREX_ALWAYS_ASSERT_WITH_MESSAGE(cons_fc != nullptr, "BuildCellCenteredMagneticField called without face-centered magnetic fields.");
 		B[0] = 0.5 * ((*cons_fc)[0](i, j, k, Physics_Indices<problem_t>::mhdFirstIndex) +
 			      (*cons_fc)[0](i + 1, j, k, Physics_Indices<problem_t>::mhdFirstIndex));
@@ -321,7 +321,7 @@ void DustSources<problem_t>::computeDustDrag(amrex::MultiFab &consVar_cc_mf, std
 	// NOLINTNEXTLINE(modernize-use-trailing-return-type)
 	amrex::ParallelFor(consVar_cc_mf, [=] AMREX_GPU_DEVICE(int bx, int i, int j, int k) {
 		std::array<amrex::Array4<const amrex::Real>, AMREX_SPACEDIM> cons_fc{};
-		if (Physics_Traits<problem_t>::is_mhd_enabled_b) { // if instead of if constexpr to avoid nvcc issues
+		if (Physics_Traits<problem_t>::is_mhd_enabled) { // if instead of if constexpr to avoid nvcc issues
 			cons_fc[0] = cons_fc_x0[bx];
 #if AMREX_SPACEDIM >= 2
 			cons_fc[1] = cons_fc_x1[bx];
@@ -645,7 +645,7 @@ void DustSources<problem_t>::computeDustDragAndLorentz(amrex::MultiFab &consVar_
 
 	amrex::ParallelFor(consVar_cc_mf, [=] AMREX_GPU_DEVICE(int bx, int i, int j, int k) {
 		std::array<amrex::Array4<const amrex::Real>, AMREX_SPACEDIM> cons_fc{};
-		if (Physics_Traits<problem_t>::is_mhd_enabled_b) {
+		if (Physics_Traits<problem_t>::is_mhd_enabled) {
 			cons_fc[0] = cons_fc_x0[bx];
 #if AMREX_SPACEDIM >= 2
 			cons_fc[1] = cons_fc_x1[bx];

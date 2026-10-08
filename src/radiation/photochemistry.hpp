@@ -71,7 +71,7 @@ auto computePhotoChemistry(amrex::MultiFab &mf, std::array<amrex::MultiFab const
 		auto const &state = mf.array(iter);
 
 		std::array<amrex::Array4<const amrex::Real>, AMREX_SPACEDIM> cons_fc{};
-		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
+		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
 			cons_fc[0] = fc_mfs[0]->const_array(iter);
 #if (AMREX_SPACEDIM >= 2)
 			cons_fc[1] = fc_mfs[1]->const_array(iter);
