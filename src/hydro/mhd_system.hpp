@@ -33,11 +33,11 @@ AMREX_ENUM(EMFAvgScheme, LondrilloDelZanna2004, Balsara2025); // NOLINT
 // every cited formula is transcribed with this sign flip baked in, so individual terms may look sign-flipped
 // relative to the paper while the net dB/dt (computed in SolveInductionEqn) remains correct.
 
-AMREX_FORCE_INLINE constexpr auto MinimumHydroRiemannGhost(bool is_mhd_enabled, EMFComputeScheme emf_compute_scheme, EMFAvgScheme emf_ave_scheme,
+AMREX_FORCE_INLINE constexpr auto MinimumHydroRiemannGhost(bool is_mhd_enabled_b, EMFComputeScheme emf_compute_scheme, EMFAvgScheme emf_ave_scheme,
 							   bool require_tracer_ghosts = false) -> int
 {
 	int nghost = require_tracer_ghosts ? 2 : 0;
-	if (is_mhd_enabled) {
+	if (is_mhd_enabled_b) {
 		if (emf_compute_scheme == EMFComputeScheme::Quokka2026) {
 			nghost = std::max(nghost, 3);
 		} else {

@@ -28,7 +28,7 @@ Defined in `src/physics_info.hpp`. User-specialized per problem to enable/disabl
 | `is_hydro_enabled`                                                              | Enable hydrodynamics                                                                |
 | `is_radiation_enabled`                                                          | Enable radiation transport                                                          |
 | `is_dust_enabled`                                                               | Enable dust dynamics                                                                |
-| `is_mhd_enabled`                                                                | Enable MHD (face-centred magnetic fields)                                           |
+| `is_mhd_enabled_b`                                                                | Enable MHD (face-centred magnetic fields)                                           |
 | `is_self_gravity_enabled`                                                       | Enable self-gravity                                                                 |
 | `numMassScalars`                                                                | Number of mass scalars (advected proportional to density)                           |
 | `numPassiveScalars`                                                             | Total number of passive scalars (must be >= `numMassScalars`)                       |
@@ -66,7 +66,7 @@ Notes:
 - `Hydro + cooling` is tested by `ResampledCoolingTest`, `ShockCloud`, `RandomBlast`, and `SN`.
 - `Hydro + chemistry` is tested by `PrimordialChem` and `PopIII`.
 - `MHD + radiation` is tested by `RadhydroPulseMGconst` (Problem 3: `MGproblemMHD`, a multigroup advecting radiation pulse with a constant background magnetic field). The combination is 3D-only because MHD requires `AMREX_SPACEDIM == 3`.
-- `MHD + cooling` is exercised by the `SN` problem with `is_mhd_enabled = true` and `cooling.enabled = 1`.
+- `MHD + cooling` is exercised by the `SN` problem with `is_mhd_enabled_b = true` and `cooling.enabled = 1`.
 - `Hydro + photoionization` is tested by `DTypeFront`, `StromgrenSphere`, and `OneZonePhotoionization`.
 - `Radiation + photoionization` is tested by `DTypeFront` and `StromgrenSphere` — photoionization requires `is_radiation_enabled = true`.
 - `Cooling + photoionization` is explicitly forbidden: both modules compute H thermochemistry (photoheating, recombination cooling, collisional ionization cooling), so enabling both simultaneously double-counts those rates. Quokka aborts at startup if `cooling.enabled = 1` and `photochemistry.enabled = 1` are set together. See `docs/markdown/photoionization.md §4.1`.
@@ -95,7 +95,7 @@ Defined in `src/physics_info.hpp`. Computes starting indices and total component
 | `pscalarFirstIndex` | `numHydroVars` (= 6)                                                   | Starting index of passive scalars                                            |
 | `dustFirstIndex`    | `pscalarFirstIndex + numPassiveScalars`                                | Starting index of dust variables                                             |
 | `radFirstIndex`     | `dustFirstIndex + numDustVarsPerGroup * nDustGroups * is_dust_enabled` | Starting index of radiation variables                                        |
-| `nvarPerDim_fc`     | `numMHDVars_per_dim * is_mhd_enabled`                                  | Number of face-centred variables per dimension                               |
+| `nvarPerDim_fc`     | `numMHDVars_per_dim * is_mhd_enabled_b`                                  | Number of face-centred variables per dimension                               |
 | `nvarTotal_fc`      | `AMREX_SPACEDIM * nvarPerDim_fc`                                       | Total face-centred variables                                                 |
 | `mhdFirstIndex`     | 0                                                                      | Starting index of MHD variables within each face-centred `MultiFab`          |
 
@@ -180,7 +180,7 @@ Face-centred variables are stored in a `std::array<MultiFab, AMREX_SPACEDIM>` (`
 
 ### MHD block (1 variable per dimension, starting at `mhdFirstIndex = 0`)
 
-Only present when `is_mhd_enabled = true`. Defined by `MHDSystem<problem_t>::varIndex_perDim`:
+Only present when `is_mhd_enabled_b = true`. Defined by `MHDSystem<problem_t>::varIndex_perDim`:
 
 
 | Index (per dim) | Name           | Quantity                                            |

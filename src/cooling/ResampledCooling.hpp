@@ -161,7 +161,7 @@ auto computeCooling(amrex::MultiFab &mf, std::array<amrex::MultiFab, AMREX_SPACE
 		auto const &nsubsteps = nsubstepsMF.array(iter);
 
 		std::array<amrex::Array4<const amrex::Real>, AMREX_SPACEDIM> state_fc{};
-		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
+		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 			for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
 				state_fc[dir] = mf_fc[dir].const_array(iter);
 			}

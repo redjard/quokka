@@ -57,21 +57,10 @@ auto computeVolumeIntegral(int finest_level, amrex::Vector<amrex::MultiFab> cons
 	for (int lev = 0; lev <= finest_level; ++lev) {
 		auto const &state = state_cc[lev].const_arrays();
 		auto const &result = q[lev].arrays();
-		if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
-			auto const &fc = state_fc[lev];
-			auto const &fc_x = fc[0].const_arrays();
-			auto const &fc_y = fc[1].const_arrays();
-			auto const &fc_z = fc[2].const_arrays();
-			amrex::ParallelFor(q[lev], [=] AMREX_GPU_DEVICE(int bx, int i, int j, int k) {
-				std::array<amrex::Array4<const amrex::Real>, AMREX_SPACEDIM> const state_fc_arr{AMREX_D_DECL(fc_x[bx], fc_y[bx], fc_z[bx])};
-				result[bx](i, j, k) = user_f(i, j, k, state[bx], state_fc_arr);
-			});
-		} else {
-			amrex::ParallelFor(q[lev], [=] AMREX_GPU_DEVICE(int bx, int i, int j, int k) {
-				std::array<amrex::Array4<const amrex::Real>, AMREX_SPACEDIM> const state_fc_arr{};
-				result[bx](i, j, k) = user_f(i, j, k, state[bx], state_fc_arr);
-			});
-		}
+		amrex::ParallelFor(q[lev], [=] AMREX_GPU_DEVICE(int bx, int i, int j, int k) {
+			std::array<amrex::Array4<const amrex::Real>, AMREX_SPACEDIM> const state_fc_arr{};
+			result[bx](i, j, k) = user_f(i, j, k, state[bx], state_fc_arr);
+		});
 	}
 	amrex::Gpu::streamSynchronize();
 

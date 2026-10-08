@@ -257,24 +257,14 @@ template <typename problem_t> class AMRSimulation : public amrex::AmrCore
 
 	auto builtin_BCs_fc(amrex::Vector<amrex::BCRec> & /*BCs_cc*/) -> amrex::Vector<amrex::BCRec>
 	{
-		static_assert(!(Physics_Traits<problem_t>::is_mhd_enabled), "You are required to explicitly define the face-centered BCs when MHD is enabled.");
+		static_assert(!(Physics_Traits<problem_t>::is_mhd_enabled_b), "You are required to explicitly define the face-centered BCs when MHD is enabled.");
 		amrex::Vector<amrex::BCRec> BCs_fc(0);
 		return BCs_fc;
 	}
 
 	void readBCs()
 	{
-		amrex::ParmParse const pp_quokka("quokka");
-		amrex::Vector<quokka::BCType::mathematicalBndryTypes> bc_type;
-		if (pp_quokka.queryarr("bc", bc_type) != 0) {
-			// Parse BCs
-			AMREX_ALWAYS_ASSERT_WITH_MESSAGE(bc_type.size() == 3, "quokka.bc must have 3 components");
-
-			BCs_cc_ = quokka::BC_cc<problem_t>(bc_type[0], bc_type[1], bc_type[2]);
-			BCs_fc_ = quokka::BC_fc<problem_t>(bc_type[0], bc_type[1], bc_type[2]);
-		} else {
-			amrex::Abort("quokka.bc must be specified in the input file.");
-		}
+		amrex::Abort("readBCs called");
 	}
 
 	void initialize();
@@ -895,12 +885,12 @@ template <typename problem_t> void AMRSimulation<problem_t>::readParameters()
 
 	EMFComputeScheme emf_compute_scheme = EMFComputeScheme::FelkerStone2017;
 	EMFAvgScheme emf_avg_scheme = EMFAvgScheme::LondrilloDelZanna2004;
-	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
+	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 		amrex::ParmParse const mhd_pp("mhd");
 		mhd_pp.query("emf_compute_scheme", emf_compute_scheme);
 		mhd_pp.query("emf_averaging_scheme", emf_avg_scheme);
 	}
-	const int nghost_Riemann = MinimumHydroRiemannGhost(Physics_Traits<problem_t>::is_mhd_enabled, emf_compute_scheme, emf_avg_scheme, do_tracers != 0);
+	const int nghost_Riemann = MinimumHydroRiemannGhost(Physics_Traits<problem_t>::is_mhd_enabled_b, emf_compute_scheme, emf_avg_scheme, do_tracers != 0);
 	nghost_cc_ = nghost_Riemann + 4;
 	nghost_fc_ = nghost_cc_;
 	setCustomGhostCells();
@@ -2168,7 +2158,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::particleMeshInterac
 			       FillPatchType::fillpatch_function);
 
 	std::array<amrex::MultiFab, AMREX_SPACEDIM> const *state_fc_ptr = nullptr;
-	if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 		for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 			fillBoundaryConditions(state_new_fc_[lev][idim], state_new_fc_[lev][idim], lev, time, quokka::centering::fc,
 					       static_cast<quokka::direction>(idim), InterpHookNone, InterpHookNone, FillPatchType::fillpatch_function);
@@ -2326,7 +2316,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::timeStepWithSubcycl
 			if (flux_reg_[lev + 1] != nullptr) {
 				flux_reg_[lev + 1]->Reflux(state_new_cc_[lev], 1.0, 0, 0, state_new_cc_[lev].nComp(), geom[lev]);
 			}
-			if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
+			if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 				if (emf_reg_[lev + 1] != nullptr) {
 					// NOLINTNEXTLINE(readability-container-data-pointer)
 					emf_reg_[lev + 1]->Reflux({AMREX_D_DECL(&state_new_fc_[lev][0], &state_new_fc_[lev][1], &state_new_fc_[lev][2])});
@@ -2490,7 +2480,7 @@ void AMRSimulation<problem_t>::MakeNewLevelFromCoarse(int level, amrex::Real tim
 
 	if (level > 0 && (do_reflux != 0)) {
 		flux_reg_[level] = std::make_unique<amrex::FluxRegister>(ba, dm, refRatio(level - 1), level, ncomp_cc);
-		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
+		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 			const int nemf_vars = 1;
 			emf_reg_[level] = std::make_unique<amrex::EdgeFluxRegister>(ba, boxArray(level - 1), dm, DistributionMap(level - 1), Geom(level),
 										    Geom(level - 1), nemf_vars);
@@ -2498,7 +2488,7 @@ void AMRSimulation<problem_t>::MakeNewLevelFromCoarse(int level, amrex::Real tim
 	}
 
 	// face-centred
-	if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 		const int ncomp_per_dim_fc = state_new_fc_[level - 1][0].nComp();
 		const int nghost_fc = state_new_fc_[level - 1][0].nGrow();
 		for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
@@ -2545,7 +2535,7 @@ void AMRSimulation<problem_t>::RemakeLevel(int level, amrex::Real time, const am
 
 	if (level > 0 && (do_reflux != 0)) {
 		flux_reg_[level] = std::make_unique<amrex::FluxRegister>(ba, dm, refRatio(level - 1), level, ncomp_cc);
-		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
+		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 			const int nemf_vars = 1;
 			emf_reg_[level] = std::make_unique<amrex::EdgeFluxRegister>(ba, boxArray(level - 1), dm, DistributionMap(level - 1), Geom(level),
 										    Geom(level - 1), nemf_vars);
@@ -2553,7 +2543,7 @@ void AMRSimulation<problem_t>::RemakeLevel(int level, amrex::Real time, const am
 	}
 
 	// face-centred
-	if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 		const int ncomp_per_dim_fc = state_new_fc_[level][0].nComp();
 		const int nghost_fc = state_new_fc_[level][0].nGrow();
 		amrex::Array<amrex::MultiFab, AMREX_SPACEDIM> int_state_new_fc;
@@ -2592,7 +2582,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::ClearLevel(int leve
 	emf_reg_[level].reset(nullptr);
 	fillpatcher_[level].reset(nullptr);
 
-	if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 		for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 			state_new_fc_[level][idim].clear();
 			state_old_fc_[level][idim].clear();
@@ -3147,7 +3137,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::setInitialCondition
 
 template <typename problem_t> void AMRSimulation<problem_t>::setInitialConditionsAtLevel_fc(int level, amrex::Real time)
 {
-	const int ncomp_per_dim_fc = Physics_Indices<problem_t>::nvarPerDim_fc;
+	const int ncomp_per_dim_fc = static_cast<int>(Physics_Traits<problem_t>::is_mhd_enabled_b);
 	const int nghost_fc = nghost_fc_;
 	// for each face-centering
 	for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
@@ -3198,24 +3188,21 @@ void AMRSimulation<problem_t>::MakeNewLevelFromScratch(int level, amrex::Real ti
 
 	if (level > 0 && (do_reflux != 0)) {
 		flux_reg_[level] = std::make_unique<amrex::FluxRegister>(ba, dm, refRatio(level - 1), level, ncomp_cc);
-		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
+		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 			const int nemf_vars = 1;
 			emf_reg_[level] = std::make_unique<amrex::EdgeFluxRegister>(ba, boxArray(level - 1), dm, DistributionMap(level - 1), Geom(level),
 										    Geom(level - 1), nemf_vars);
 		}
 	}
 
-	// face-centred
-	if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
-		const int ncomp_per_dim_fc = Physics_Indices<problem_t>::nvarPerDim_fc;
-		const int nghost_fc = nghost_fc_;
-		for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
-			state_new_fc_[level][idim] =
-			    amrex::MultiFab(amrex::convert(ba, amrex::IntVect::TheDimensionVector(idim)), dm, ncomp_per_dim_fc, nghost_fc);
-			state_old_fc_[level][idim] =
-			    amrex::MultiFab(amrex::convert(ba, amrex::IntVect::TheDimensionVector(idim)), dm, ncomp_per_dim_fc, nghost_fc);
+	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
+		for (int idim = 0; idim < 3; ++idim) {
+			state_new_fc_[level][idim] = amrex::MultiFab(amrex::convert(ba, amrex::IntVect::TheDimensionVector(idim)), dm, 1, nghost_fc_);
+			state_old_fc_[level][idim] = amrex::MultiFab(amrex::convert(ba, amrex::IntVect::TheDimensionVector(idim)), dm, 1, nghost_fc_);
 		}
 	}
+	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 	// precalculate any required data (e.g., data table; as implemented by the
 	// user) before initialising state variables
@@ -3223,9 +3210,12 @@ void AMRSimulation<problem_t>::MakeNewLevelFromScratch(int level, amrex::Real ti
 
 	// initial state variables
 	setInitialConditionsAtLevel_cc(level, time);
-	if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+	
+	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 		setInitialConditionsAtLevel_fc(level, time);
 	}
+	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 	// set flag
 	areInitialConditionsDefined_ = true;
@@ -3559,7 +3549,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::AverageDownTo(int c
 			    refRatio(crse_lev));
 
 	// face-centred
-	if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 		// for each face-centering (number of dimensions)
 		for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 			amrex::average_down_faces(state_new_fc_[crse_lev + 1][idim], state_new_fc_[crse_lev][idim], refRatio(crse_lev), geom[crse_lev]);
@@ -3791,7 +3781,7 @@ void AMRSimulation<problem_t>::FillPlotFileScratchFaceData(const int finest_lev_
 	AMREX_ASSERT(finest_lev_to_fill <= finest_level);
 	scratch_fc.clear();
 
-	if constexpr (Physics_Indices<problem_t>::nvarPerDim_fc > 0) {
+	if constexpr (static_cast<int>(Physics_Traits<problem_t>::is_mhd_enabled_b) > 0) {
 		scratch_fc.reserve(finest_lev_to_fill + 1);
 		auto const dir = static_cast<quokka::direction>(idim);
 
@@ -3853,7 +3843,7 @@ void AMRSimulation<problem_t>::FillPlotFileScratchData(const int finest_lev_to_f
 		AMREX_ASSERT(!scratch_cc[lev].contains_nan(0, scratch_cc[lev].nComp()));
 		AMREX_ASSERT(!scratch_cc[lev].contains_nan());
 
-		if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 			for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 				scratch_fc[lev][idim].define(state_new_fc_[lev][idim].boxArray(), state_new_fc_[lev][idim].DistributionMap(),
 							     state_new_fc_[lev][idim].nComp(), included_ghosts);
@@ -3915,7 +3905,7 @@ auto AMRSimulation<problem_t>::PlotFileMFAtLevel_cc(const int lev, const int inc
 		}
 
 		// Check if it's a face-centered variable
-		if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 			auto fc_it = std::ranges::find(componentNames_fc_flat_, varname);
 			if (fc_it != componentNames_fc_flat_.end()) {
 				const int fc_comp_flat = std::distance(componentNames_fc_flat_.begin(), fc_it);
@@ -3996,7 +3986,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::ComputeDensityFloor
 
 template <typename problem_t> auto AMRSimulation<problem_t>::PlotFileMFAtLevel_fc(const int lev, int idim, const int nghost_fc_) -> amrex::MultiFab
 {
-	if constexpr (Physics_Indices<problem_t>::nvarPerDim_fc > 0) {
+	if constexpr (static_cast<int>(Physics_Traits<problem_t>::is_mhd_enabled_b) > 0) {
 		if (nghost_fc_ > 0) {
 			amrex::Vector<amrex::MultiFab> scratch_fc;
 			FillPlotFileScratchFaceData(lev, nghost_fc_, idim, scratch_fc);
@@ -4012,8 +4002,8 @@ auto AMRSimulation<problem_t>::PlotFileMFAtLevel_fc(const int lev, int idim, con
 {
 	int comp = 0;
 	int nvar_dim_tot_fc = 0;
-	if constexpr (Physics_Indices<problem_t>::nvarPerDim_fc > 0) {
-		nvar_dim_tot_fc = Physics_Indices<problem_t>::nvarPerDim_fc;
+	if constexpr (static_cast<int>(Physics_Traits<problem_t>::is_mhd_enabled_b) > 0) {
+		nvar_dim_tot_fc = static_cast<int>(Physics_Traits<problem_t>::is_mhd_enabled_b);
 	}
 	const int ncomp_plotMF_fc = nvar_dim_tot_fc;
 
@@ -4086,7 +4076,7 @@ template <typename problem_t> auto AMRSimulation<problem_t>::PlotFileMF_fc(const
 {
 	std::array<amrex::Vector<amrex::MultiFab>, AMREX_SPACEDIM> r_fc;
 	for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
-		if constexpr (Physics_Indices<problem_t>::nvarPerDim_fc > 0) {
+		if constexpr (static_cast<int>(Physics_Traits<problem_t>::is_mhd_enabled_b) > 0) {
 			if (nghost_fc_ > 0) {
 				amrex::Vector<amrex::MultiFab> scratch_fc;
 				FillPlotFileScratchFaceData(finest_level, nghost_fc_, idim, scratch_fc);
@@ -4421,9 +4411,9 @@ template <typename problem_t> auto AMRSimulation<problem_t>::GetPlotfileVarNames
 template <typename problem_t> auto AMRSimulation<problem_t>::GetPlotfileVarNames_fc() const -> std::array<amrex::Vector<std::string>, AMREX_SPACEDIM>
 {
 	std::array<amrex::Vector<std::string>, AMREX_SPACEDIM> varnames_fc; // nvarTotal or perDim?
-	if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 		for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
-			for (int icomp = 0; icomp < Physics_Indices<problem_t>::nvarPerDim_fc; ++icomp) {
+			for (int icomp = 0; icomp < static_cast<int>(Physics_Traits<problem_t>::is_mhd_enabled_b); ++icomp) {
 				varnames_fc[idim].push_back(componentNames_fc_[idim][icomp]);
 			}
 		}
@@ -4470,7 +4460,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::WritePlotFile()
 	quokka::ScopedVisMFNOutFiles scoped_nfiles(plot_nfiles);
 
 	amrex::WriteMultiLevelPlotfile(plotfilename, finest_level + 1, mf_cc_ptr, varnames, Geom(), tNew_[0], istep, refRatio());
-	if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 		// Create fc_vars directory if it doesn't exist
 		const std::string fc_vars_dir = plotfilename + "/fc_vars";
 		if (amrex::ParallelDescriptor::IOProcessor()) {
@@ -4713,7 +4703,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::WriteCheckpointFile
 	}
 
 	// write the face-centred MultiFab data to, e.g., chk0000010/Level_0/
-	if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 		for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 			for (int lev = 0; lev <= finest_level; ++lev) {
 				amrex::MultiFab chkMF(state_new_fc_[lev][idim].boxArray(), state_new_fc_[lev][idim].DistributionMap(),
@@ -4888,7 +4878,7 @@ void AMRSimulation<problem_t>::interpolateFaceMultiFabFromRestart(int lev, const
 			amrex::MultiFab tmp_read;
 			amrex::VisMF::Read(tmp_read,
 					   amrex::MultiFabFileFullPrefix(lev, restart_chkfile, "Level_", std::string("Face_") + quokka::face_dir_str[idim]));
-			state_new_fc_[lev][idim].ParallelCopy(tmp_read, 0, 0, Physics_Indices<problem_t>::nvarPerDim_fc, amrex::IntVect(0), amrex::IntVect(0));
+			state_new_fc_[lev][idim].ParallelCopy(tmp_read, 0, 0, static_cast<int>(Physics_Traits<problem_t>::is_mhd_enabled_b), amrex::IntVect(0), amrex::IntVect(0));
 			AMREX_ALWAYS_ASSERT(!state_new_fc_[lev][idim].contains_nan(0, state_new_fc_[lev][idim].nComp())); // check valid faces
 		}
 	} else {
@@ -4993,7 +4983,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::loadMultiFabData(co
 	// if refining, we have to read all levels of face data from restart file up front
 	amrex::Vector<amrex::Array<amrex::MultiFab, AMREX_SPACEDIM>> restart_fc;
 	if (context.needs_refinement()) {
-		if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 			restart_fc.resize(finest_level + 1);
 			for (int chklev = 0; chklev <= finest_level; ++chklev) {
 				for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
@@ -5023,7 +5013,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::loadMultiFabData(co
 		AMREX_ALWAYS_ASSERT(!state_new_cc_[lev].contains_nan(0, state_new_cc_[lev].nComp())); // check valid cells
 
 		// face-centred data
-		if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 			interpolateFaceMultiFabFromRestart(lev, context, restart_geom, restart_fc);
 			for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 				AMREX_ALWAYS_ASSERT(!state_new_fc_[lev][idim].contains_nan(0, state_new_fc_[lev][idim].nComp())); // check valid faces
@@ -5099,16 +5089,16 @@ template <typename problem_t> void AMRSimulation<problem_t>::ReadCheckpointFile(
 
 		if (lev > 0 && (do_reflux != 0)) {
 			flux_reg_[lev] = std::make_unique<amrex::FluxRegister>(ba, dm, refRatio(lev - 1), lev, ncomp_cc);
-			if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
+			if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 				const int nemf_vars = 1;
 				emf_reg_[lev] = std::make_unique<amrex::EdgeFluxRegister>(ba, boxArray(lev - 1), dm, DistributionMap(lev - 1), Geom(lev),
 											  Geom(lev - 1), nemf_vars);
 			}
 		}
 
-		const int ncomp_per_dim_fc = Physics_Indices<problem_t>::nvarPerDim_fc;
+		const int ncomp_per_dim_fc = static_cast<int>(Physics_Traits<problem_t>::is_mhd_enabled_b);
 		const int nghost_fc = nghost_fc_;
-		if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 			for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 				state_new_fc_[lev][idim] =
 				    amrex::MultiFab(amrex::convert(ba, amrex::IntVect::TheDimensionVector(idim)), dm, ncomp_per_dim_fc, nghost_fc);
@@ -5130,7 +5120,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::ReadCheckpointFile(
 	for (int lev = 0; lev <= finest_level; ++lev) {
 		fillBoundaryConditions(state_new_cc_[lev], state_new_cc_[lev], lev, tNew_[lev], quokka::centering::cc, quokka::direction::na, InterpHookNone,
 				       InterpHookNone, FillPatchType::fillpatch_function);
-		if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 			for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 				fillBoundaryConditions(state_new_fc_[lev][idim], state_new_fc_[lev][idim], lev, tNew_[lev], quokka::centering::fc,
 						       static_cast<quokka::direction>(idim), InterpHookNone, InterpHookNone, FillPatchType::fillpatch_function);
@@ -5140,7 +5130,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::ReadCheckpointFile(
 	// Copy to state_old_cc_ (including ghost zones)
 	for (int lev = 0; lev <= finest_level; ++lev) {
 		state_old_cc_[lev].ParallelCopy(state_new_cc_[lev], 0, 0, state_new_cc_[lev].nComp(), nghost_cc_, nghost_cc_);
-		if constexpr (Physics_Indices<problem_t>::nvarTotal_fc > 0) {
+		if constexpr (Physics_Traits<problem_t>::is_mhd_enabled_b) {
 			for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
 				state_old_fc_[lev][idim].ParallelCopy(state_new_fc_[lev][idim], 0, 0, state_new_fc_[lev][idim].nComp(), nghost_fc_, nghost_fc_);
 			}

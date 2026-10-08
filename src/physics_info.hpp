@@ -40,7 +40,6 @@ struct DefaultPhysicsTraits {
 	static constexpr bool is_radiation_enabled = false;
 	static constexpr bool is_dust_enabled = false;
 	static constexpr bool is_self_gravity_enabled = false;
-	static constexpr bool is_mhd_enabled = false;
 	static constexpr ResistivityModel resistivity_model = ResistivityModel::none;
 	static constexpr ViscosityModel viscosity_model = ViscosityModel::none;
 	static constexpr int nGroups = 1;     // number of radiation groups
@@ -82,8 +81,6 @@ template <typename problem_t> struct Physics_Indices {
 	static constexpr int radFirstIndex = dustFirstIndex + Physics_NumVars::numDustVarsPerGroup * Physics_Traits<problem_t>::nDustGroups *
 								  static_cast<int>(Physics_Traits<problem_t>::is_dust_enabled);
 	// face-centered
-	static constexpr int nvarPerDim_fc = Physics_NumVars::numMHDVars_per_dim * static_cast<int>(Physics_Traits<problem_t>::is_mhd_enabled);
-	static constexpr int nvarTotal_fc = AMREX_SPACEDIM * nvarPerDim_fc;
 	static constexpr int mhdFirstIndex = 0;
 };
 
@@ -91,20 +88,10 @@ template <typename problem_t> struct Physics_Indices {
 // Defined here (rather than inline in a ParallelFor lambda) to work around an NVCC limitation
 // that disallows first-capturing variables in constexpr-if contexts inside extended device lambdas.
 template <typename problem_t>
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE auto ComputeCellCenteredMagneticEnergy(int i, int j, int k,
-									   std::array<amrex::Array4<const amrex::Real>, AMREX_SPACEDIM> const &fc) -> double
-{
-	if constexpr (Physics_Traits<problem_t>::is_mhd_enabled) {
-		constexpr int mhdIdx = Physics_Indices<problem_t>::mhdFirstIndex;
-		const amrex::Real bx = 0.5 * (fc[0](i, j, k, mhdIdx) + fc[0](i + 1, j, k, mhdIdx));
-#if (AMREX_SPACEDIM >= 2)
-		const amrex::Real by = 0.5 * (fc[1](i, j, k, mhdIdx) + fc[1](i, j + 1, k, mhdIdx));
-#endif
-#if (AMREX_SPACEDIM == 3)
-		const amrex::Real bz = 0.5 * (fc[2](i, j, k, mhdIdx) + fc[2](i, j, k + 1, mhdIdx));
-#endif
-		return 0.5 * (AMREX_D_TERM(bx * bx, +by * by, +bz * bz));
-	}
+AMREX_GPU_DEVICE AMREX_FORCE_INLINE auto ComputeCellCenteredMagneticEnergy(
+	int i, int j, int k,
+	std::array<amrex::Array4<const amrex::Real>, 3> const &fc
+) -> double {
 	return 0.0;
 }
 
