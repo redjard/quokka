@@ -1474,6 +1474,11 @@ template <typename problem_t> void AMRSimulation<problem_t>::evolve()
 
 	getWalltime(); // initialize start_time
 
+	constexpr int eta_window = 10;
+	amrex::Real step_times[eta_window] = {0.0};
+	amrex::Real sim_times[eta_window]  = {0.0};
+	int buf_idx = 0;
+
 	// Main time loop
 	int step = istep[0];
 	for (; step < maxTimesteps_ && cur_time < stopTime_; ++step) {
@@ -1482,10 +1487,29 @@ template <typename problem_t> void AMRSimulation<problem_t>::evolve()
 			if (amrex::Verbose())
 				amrex::Print() << "\n";
 			// amrex::Print() << "Coarse STEP " << step + 1 << " at t = " << cur_time << " (" << (cur_time / stopTime_) * 100. << "%) starts ";
-			amrex::Print() << std::format("{:4} ({:7.4f}%): ",step,(cur_time / stopTime_) * 100.);
+			amrex::Print() << std::format("{:4} ({:7.4f}%) ",step,(cur_time / stopTime_) * 100.);
 		}
 
 		amrex::ParallelDescriptor::Barrier(); // synchronize all MPI ranks
+		
+		const amrex::Real prev_step = step_times[buf_idx];
+		const amrex::Real prev_sim = sim_times[buf_idx];
+		step_times[buf_idx] = amrex::ParallelDescriptor::second();
+		sim_times[buf_idx] = cur_time;
+		buf_idx++; buf_idx %= eta_window;
+		
+		const amrex::Real eta = (stopTime_ - cur_time) * ( step_times[buf_idx] - prev_step )/( sim_times[buf_idx] - prev_sim );
+		
+		long long s = static_cast<long long>(std::llround(eta));
+		const int ss = static_cast<int>(s % 60); s /= 60;
+		const int mm = static_cast<int>(s % 60); s /= 60;
+		const long long hh = s;
+		
+		if (0 <= hh && hh <= 100'000) {
+			amrex::Print() << std::format("{:02}:{:02}:{:02}", hh, mm, ss);
+		} else {
+			amrex::Print() << "--:--:--";
+		}
 
 		if (suppress_output == 0) {
 			// output per-cycle timing
@@ -1496,6 +1520,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::evolve()
 				// amrex::Print() << "...\n";
 			}
 		}
+		amrex::Print() << "   ";
 
 		computeTimestep();
 

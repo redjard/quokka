@@ -84,9 +84,8 @@ from matplotlib.colors import SymLogNorm, LogNorm
 is_root = True
 
 
-domag = False
-# scale = 1/3
 scale = 1
+# scale = 1/3
 
 # # ── MPI setup ─────────────────────────────────────────────────────────────────
 # comm = MPI.COMM_WORLD
@@ -131,11 +130,11 @@ if do_sn_zoom:
 else:
     rprint("SN zoom target: (none given, skipping)")
 
-# yt's own parallelism distributes the grid/chunk IO of a single collective
-# call (SlicePlot, ProjectionPlot, covering_grid) across every rank in
-# COMM_WORLD, then gathers the assembled result back to rank 0. All ranks
-# must call these functions together (SPMD) for this to work.
-yt.enable_parallelism()
+# # yt's own parallelism distributes the grid/chunk IO of a single collective
+# # call (SlicePlot, ProjectionPlot, covering_grid) across every rank in
+# # COMM_WORLD, then gathers the assembled result back to rank 0. All ranks
+# # must call these functions together (SPMD) for this to work.
+# yt.enable_parallelism()
 
 yt.set_log_level("warning")
 
@@ -143,9 +142,10 @@ yt.set_log_level("warning")
 # FIXED AXES — locked color-scale ranges for cross-run comparison
 # ============================================================
 # 12-panel B field: components are diverging (+-), |B| is sequential (0..max)
-BFIELD_COMP_VMAX = 2e-7          # Bx, By, Bz shown on [-VMAX, +VMAX]
+BFIELD_COMP_VMAX = None          # Bx, By, Bz shown on [-VMAX, +VMAX]
+BFIELD_COMP_VMIN = None  # -BFIELD_COMP_VMAX
 BFIELD_MAG_VMIN  = 0.0           # |B| shown on [VMIN, VMAX]
-BFIELD_MAG_VMAX  = 2e-7
+BFIELD_MAG_VMAX  = None
 
 # Bphi 2-way comparison: XY (midplane) panels get a wider range than the
 # XZ / YZ (edge-on) panels, since Bphi is concentrated near the midplane.
@@ -155,11 +155,12 @@ BPHI_LINTHRESH_FRACTION = 1e-2   # linthresh = VMAX * this fraction
 
 # Density slices: floor is the simulation's density floor, ceiling is
 # roughly the disk midplane peak.
-DENS_LOG_VMIN = -32.0            # log10(rho_floor [g/cm^3])
-DENS_LOG_VMAX = -20.0            # log10(rho_max   [g/cm^3])
+DENS_LOG_VMIN = None            # log10(rho_floor [g/cm^3])
+DENS_LOG_VMAX = None            # log10(rho_max   [g/cm^3])
 
 # div B slices: symmetric linear range (NOT log)
-DIVB_VMAX = 5e-31
+DIVB_VMAX = None
+DIVB_VMIN = None  # -DIVB_VMAX
 
 # Column-density (z-projection) panel: normalized to Sigma/Sigma_c0 on a log
 # color scale from 10^-1 to 10^0, matching Arora et al. (2025, A&A 695, A155)
@@ -181,7 +182,7 @@ SIGMA_PROJ_VMAX = 1e0    # Sigma/Sigma_c0 upper bound (matches Fig. 2/3 colorbar
 # magnitude uses LogNorm. VMAX_VEL/LINTHRESH set the FIXED full-domain
 # scale; the zoomed SN panel below auto-scales instead (see that section).
 # VMAX_VEL = 2e7 *scale   # example 200 km/s in cm/s
-VMAX_VEL = 2e10 *scale   # example 200 km/s in cm/s
+VMAX_VEL = 2e8 *scale   # example 200 km/s in cm/s
 LINTHRESH = 1e5
 
 # ============================================================
@@ -207,12 +208,14 @@ if IS_HYDRO:
 
 ds = yt.load(
     PLOTFILE,
-    units_override={
-        "length_unit": (1.0, "cm"),
-        "time_unit":   (1.0, "s"),
-        "mass_unit":   (1.0, "g"),
-    }
+    # units_override={
+    #     "length_unit": (1.0, "cm"),
+    #     "time_unit":   (1.0, "s"),
+    #     "mass_unit":   (1.0, "g"),
+    # }
 )
+
+domag = ('boxlib', 'x-BField') in ds.field_list
 
 # ── Timestep tag for output filenames ─────────────────────────────────────────
 # Extracts the ####### digits from e.g. "...plt0044000" -> "0044000"
@@ -350,8 +353,8 @@ def get_slice_xy_zoom(normal, field, center_cm, width_cm_zoom, res=RES):
         data = data.T
     return data, info["xlabel"], info["ylabel"], info["title"]
 
-def get_proj(field, weight=None, res=RES):
-    proj = yt.ProjectionPlot(ds, "z", field,
+def get_proj(field, weight=None, res=RES, dir="z"):
+    proj = yt.ProjectionPlot(ds, dir, field,
                              weight_field=weight, center="c",
                              width=(width_cm, "cm"))
     proj.set_buff_size(res)
@@ -490,7 +493,7 @@ if domag:
                     norm = plt.Normalize(vmin=BFIELD_MAG_VMIN, vmax=BFIELD_MAG_VMAX)
                     cmap = "inferno"
                 else:
-                    norm = plt.Normalize(vmin=-BFIELD_COMP_VMAX, vmax=BFIELD_COMP_VMAX)
+                    norm = plt.Normalize(vmin=BFIELD_COMP_VMIN, vmax=BFIELD_COMP_VMAX)
                     cmap = "RdBu_r"
                 im = ax.pcolormesh(
                     np.linspace(extent_kpc[0], extent_kpc[1], data.shape[1]+1),
@@ -552,82 +555,87 @@ if is_root:
     plt.close(fig)
     # rprint(f"Saved: {tag('density_slices.png')}")
 
-# normals_3 = ["z", "y", "x"]
-# fig, axes = plt.subplots(1, len(normals_3), figsize=(len(normals_3)*5, 5))
-# for ax, normal in zip(axes, normals_3):
-#     data = yt.ProjectionPlot(ds, normal,
-#         ("boxlib", "velocity_mag"),
-#         method="max",
-#         width=(width_cm/8,'cm'),
-#         # center="max_velocity_mag",
-#     ).set_buff_size(RES*4).frb[("boxlib", "velocity_mag")].v
-#     if _PLANE_INFO[normal]["transpose"]: data = data.T
-#     log_data = np.log10(np.where(data > 0, data, 1e-300))
-#     im = ax.imshow(log_data, origin="lower", extent=extent_kpc/8, cmap="viridis", interpolation="nearest", aspect="equal")
-#     plt.colorbar(im, ax=ax, label=r"log$_{10}$ max(|v|) [cm/s]")
-#     ax.set_title(f"{normal}-projection", fontsize=9)
-#     ax.set_xlabel('[kpc]'); ax.set_ylabel('[kpc]')
-# fig.suptitle(f"Velocity Maximum — t = {t_myr:.1f} Myr", fontsize=12)
-# fig.tight_layout()
-# fig.savefig(tag("vel_maximum.png"), dpi=150, bbox_inches="tight")
-# plt.close(fig)
-# rprint(f"Saved: {tag('density_slices.png')}")
+normals_3 = ["z", "y", "x"]
+fig, axes = plt.subplots(1, len(normals_3), figsize=(len(normals_3)*5, 5))
+for ax, normal in zip(axes, normals_3):
+    p, xlabel, ylabel, title = get_slice_xy(normal, ("boxlib", "pressure"))
+    rho, *_ = get_slice_xy(normal, ("boxlib", "gasDensity"))
+    mu = 0.6  # mean molecular weight, adjust if needed
+    m_p = 1.67262192369e-24  # g
+    k_B = 1.380649e-16       # erg/K
+    data = (mu * m_p / k_B) * (p / rho)
+    # log_data = np.log10(np.where(data > 0, data, 1e-300))
+    im = ax.imshow(np.log10(data), origin="lower", extent=extent_kpc, cmap="viridis", interpolation="nearest", aspect="equal")
+    plt.colorbar(im, ax=ax, label=r"log$_{10}$ T [K]")
+    ax.set_title(title, fontsize=9)
+    ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
+fig.suptitle(f"Temperature slices — t = {t_myr:.1f} Myr", fontsize=12)
+fig.tight_layout()
+fig.savefig(tag("T_slices.png"), dpi=150, bbox_inches="tight")
+plt.close(fig)
+rprint(f"Saved: {tag('T_slices.png')}")
 
-# rprint("  Column density projection...")
-proj_data = get_proj(("boxlib", "gasDensity"))  # collective — all ranks call this
-# get_proj integrates gasDensity along the sightline (no weight_field), so
-# proj_data is already a surface density Sigma in g/cm^2 -- exactly the
-# quantity plotted (normalized) in Fig. 2/3 of Arora et al. (2025).
 
-if is_root:
-    # Central pixel is our proxy for Sigma(R=0) at this snapshot. Reported
-    # every run so you can read it off once from your t=0 plotfile and
-    # hardcode it into SIGMA_C0_GCM2 above for consistent normalization
-    # across snapshots/times.
-    ny, nx = proj_data.shape
-    sigma_center_this_snapshot = proj_data[ny // 2, nx // 2]
-    # rprint(f"  Central column density (this snapshot) = {sigma_center_this_snapshot:.3e} g/cm^2")
-    
-    if SIGMA_C0_GCM2 is not None:
-        sigma_c0 = SIGMA_C0_GCM2
-    else:
-        sigma_c0 = sigma_center_this_snapshot
-        # rprint("  WARNING: SIGMA_C0_GCM2 not set -- normalizing by this "
-        #        "snapshot's own central column density. Set SIGMA_C0_GCM2 "
-        #        "to the t=0 value above for consistent normalization across "
-        #        "different snapshots/times.")
 
-    sigma_ratio = proj_data / sigma_c0
+fig, axes = plt.subplots(1, 2, figsize=(2*7, 6))
+ax = axes[0]
+im = ax.imshow(
+    get_proj(("boxlib", "gasDensity"), res=RES*4),
+    origin="lower", extent=extent_kpc, cmap="viridis",
+    norm=LogNorm(),
+    aspect="equal",
+)
+plt.colorbar(im, ax=ax, label=r"$\Sigma$")
+ax.set_title(f"Column density (z-projection) — t = {t_myr:.1f} Myr")
+ax.set_xlabel("x [kpc]"); ax.set_ylabel("y [kpc]")
 
-    fig, axes = plt.subplots(1, 2, figsize=(2*7, 6))
-    ax = axes[0]
-    im = ax.imshow(
-        sigma_ratio,
-        origin="lower", extent=extent_kpc, cmap="viridis",
-        norm=LogNorm(vmin=SIGMA_PROJ_VMIN, vmax=SIGMA_PROJ_VMAX),
-        interpolation="nearest", aspect="equal",
-    )
-    plt.colorbar(im, ax=ax, label=r"$\Sigma/\Sigma_{c0}$")
-    ax.set_title(f"Column density (z-projection) — t = {t_myr:.1f} Myr")
-    ax.set_xlabel("x [kpc]"); ax.set_ylabel("y [kpc]")
-    
-    ax = axes[1]
-    im = ax.imshow(
-        get_slice('z',("index", "cell_volume"), RES*4),
-        origin="lower", extent=extent_kpc, cmap="hsv",
-        # norm=LogNorm(vmin=SIGMA_PROJ_VMIN, vmax=SIGMA_PROJ_VMAX),
-        norm=LogNorm(),
-        aspect="equal",
-    )
-    plt.colorbar(im, ax=ax, label=r"")
-    ax.set_title(f"Grid cell volume")
-    ax.set_xlabel("x [kpc]"); ax.set_ylabel("y [kpc]")
-    
-    fig.tight_layout()
-    fig.savefig(tag("density_projection3.png"), dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    # rprint(f"Saved: {tag('density_projection3.png')}")
-#"""
+ax = axes[1]
+im = ax.imshow(
+    get_proj(("boxlib", "gasDensity"), res=RES*4, dir="x"),
+    origin="lower", extent=extent_kpc, cmap="viridis",
+    norm=LogNorm(),
+    aspect="equal",
+)
+plt.colorbar(im, ax=ax, label=r"$\Sigma$")
+ax.set_title(f"Column density (z-projection) — t = {t_myr:.1f} Myr")
+ax.set_xlabel("y [kpc]"); ax.set_ylabel("z [kpc]")
+
+fig.tight_layout()
+fig.savefig(tag("density_projection3.png"), dpi=150, bbox_inches="tight")
+plt.close(fig)
+# rprint(f"Saved: {tag('density_projection3.png')}")
+
+
+
+fig, axes = plt.subplots(1, 2, figsize=(2*7, 6))
+ax = axes[0]
+im = ax.imshow(
+    get_slice('z',("index", "cell_volume"), RES*4),
+    origin="lower", extent=extent_kpc, cmap="gist_ncar",
+    # norm=LogNorm(vmin=SIGMA_PROJ_VMIN, vmax=SIGMA_PROJ_VMAX),
+    norm=LogNorm(),
+    aspect="equal",
+)
+plt.colorbar(im, ax=ax, label=r"")
+ax.set_title(f"Grid cell volume")
+ax.set_xlabel("x [kpc]"); ax.set_ylabel("y [kpc]")
+
+ax = axes[1]
+im = ax.imshow(
+    get_slice('x',("index", "cell_volume"), RES*4),
+    origin="lower", extent=extent_kpc, cmap="gist_ncar",
+    # norm=LogNorm(vmin=SIGMA_PROJ_VMIN, vmax=SIGMA_PROJ_VMAX),
+    norm=LogNorm(),
+    aspect="equal",
+)
+plt.colorbar(im, ax=ax, label=r"")
+ax.set_title(f"Grid cell volume")
+ax.set_xlabel("y [kpc]"); ax.set_ylabel("z [kpc]")
+
+fig.tight_layout()
+fig.savefig(tag("grid_layout.png"), dpi=150, bbox_inches="tight")
+plt.close(fig)
+rprint(f"Saved: {tag('grid_layout.png')}")
 
 # ============================================================
 # Dead-zone / mask geometry — needed by plasma beta (below) AND by the
@@ -696,12 +704,12 @@ if domag:
 
     max_level = ds.index.max_level
     dims_full = ds.domain_dimensions * (2 ** max_level)
-    n_slabs   = max(128, size)
+    n_slabs   = 128
     slab_nz   = max(1, -(-dims_full[2] // n_slabs))  # ceiling division so the last slab isn't dropped
 
     rho_transition = 1e-28
 
-    rng            = np.random.default_rng(42 + rank)
+    rng            = np.random.default_rng(42)
     RESERVOIR_N    = 1_000_000 # Reduced slightly to ensure memory safety
     beta_reservoir = np.empty(RESERVOIR_N, dtype=np.float32)
     reservoir_fill = 0
@@ -711,9 +719,9 @@ if domag:
     dx = ds.domain_width.v / dims_full
 
     rprint(f"  Finest-level dims: {dims_full}")
-    rprint(f"  n_slabs={n_slabs}, slab_nz={slab_nz} cells, {size} rank(s)")
+    rprint(f"  n_slabs={n_slabs}, slab_nz={slab_nz} cells")
 
-    my_slab_indices = list(range(rank, n_slabs, size))
+    my_slab_indices = list(range(0, n_slabs, 1))
 
     for slab_idx in my_slab_indices:
         z0_cell = slab_idx * slab_nz
@@ -748,20 +756,16 @@ if domag:
             del beta, rho, mask_disk
         gc.collect()
 
-    comm.Barrier()
-    rprint("  All ranks finished. Reducing data...")
+    # comm.Barrier()
+    # rprint("  All ranks finished. Reducing data...")
 
     # GATHER AND PERCENTILES
-    all_reservoirs = comm.gather(beta_reservoir[:reservoir_fill], root=0)
+    # all_reservoirs = comm.gather(beta_reservoir[:reservoir_fill], root=0)
+    all_reservoirs = beta_reservoir[:reservoir_fill]
 
-    if is_root:
-        if all_reservoirs and any(len(arr) > 0 for arr in all_reservoirs):
-            master = np.concatenate(all_reservoirs)
-            rprint("  Disk beta percentiles:")
-            for p in [10, 25, 50, 75, 90]:
-                print(f"    {p}th: {np.percentile(master, p):.3e}")
-        else:
-            rprint("  No disk cells found in any rank.")
+    rprint("  Disk beta percentiles:")
+    for p in [10, 25, 50, 75, 90]:
+        print(f"    {p}th: {np.percentile(all_reservoirs, p):.3e}")
   else:
     rprint("\n--- Plasma beta (masked + volume averages): skipped (hydro run) ---")
 
@@ -779,13 +783,12 @@ if domag:
     # (each patch is blocking-factor sized) and distributes cleanly across ranks.
     for lev in range(ds.index.max_level + 1):
         level_grids = ds.index.select_grids(lev)
-        my_grids = level_grids[rank::size]
 
         max_val = -np.inf
         sum_val = 0.0
         count = 0
 
-        for g in my_grids:
+        for g in level_grids:
             data = g[("boxlib", "divB")].v
             abs_data = np.abs(data)
 
@@ -797,9 +800,9 @@ if domag:
             del data, abs_data
 
         # Gather results from all MPI ranks to rank 0
-        global_max = comm.allreduce(max_val, op=MPI.MAX)
-        global_sum = comm.allreduce(sum_val, op=MPI.SUM)
-        global_count = comm.allreduce(count, op=MPI.SUM)
+        global_max = max_val
+        global_sum = sum_val
+        global_count = count
 
         if is_root:
             mean_val = global_sum / global_count if global_count > 0 else 0.0
@@ -823,14 +826,15 @@ if domag:
             data = divB_panels[normal]
             xlabel, ylabel, title = divB_meta[normal]
             im = ax.imshow(data, origin="lower", extent=extent_kpc,
-                           cmap="RdBu_r", vmin=-DIVB_VMAX, vmax=DIVB_VMAX,
+                           cmap="RdBu_r", vmin=DIVB_VMIN, vmax=DIVB_VMAX,
                            interpolation="nearest", aspect="equal")
             plt.colorbar(im, ax=ax, label=r"$\nabla\cdot B$")
             ax.set_title(f"div B — {title}", fontsize=9)
             ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
 
         fig.suptitle(
-            f"div B — t = {t_myr:.1f} Myr\nmax |divB| (this run) = {all_divB_max:.2e}  |  scale fixed to ±{DIVB_VMAX:.1e}",
+            # f"div B — t = {t_myr:.1f} Myr\nmax |divB| (this run) = {all_divB_max:.2e}  |  scale fixed to ±{DIVB_VMAX:.1e}",
+            f"div B — t = {t_myr:.1f} Myr\nmax |divB| (this run) = {all_divB_max:.2e}",
             fontsize=12)
         fig.tight_layout()
         fig.savefig(tag("divB_slices_raw.png"), dpi=150, bbox_inches="tight")
@@ -893,8 +897,8 @@ if domag:
         print(f"Bphi 99th percentile (midplane)   : {bphi_max:.3e} G")
         print(f"|B|  rms             (midplane)   : {bmag_rms:.3e} G")
         print(f"|B|  99th percentile (midplane)   : {bmag_max:.3e} G")
-        print(f"Bphi/|B|_rms                      : {bphi_max/bmag_rms:.3e}  (target: < 1e-2)")
-        print(f"Bphi/|B|_max                      : {bphi_max/bmag_max:.3e}  (target: < 1e-2)")
+        # print(f"Bphi/|B|_rms                      : {bphi_max/bmag_rms:.3e}  (target: < 1e-2)")
+        # print(f"Bphi/|B|_max                      : {bphi_max/bmag_max:.3e}  (target: < 1e-2)")
         print("====================================================")
 
         n_cell    = ds.domain_dimensions[0]
@@ -1187,7 +1191,7 @@ if do_sn_zoom:
 # ============================================================
 # rprint("\n--- Rotation curve diagnostic ---")
 
-Rc_kpc  = 2 *scale
+Rc_kpc  = 0.5 *scale
 Rc_cm   = Rc_kpc * 1.0e3 * 3.085677581e18
 cs_disk = 7.0e5
 Mc      = float(ds.parameters.get("mhd_galaxy.Mc", 28.6 *scale))
@@ -1300,7 +1304,7 @@ def sample_plane_density_to_radii(data,res=RES,cutoff_radius=None):
 vcirc_data = get_slice("z", ("boxlib", "circular_velocity"))  # collective — all ranks call this
 
 if is_root:
-    bounds = (0,10 *scale)  # MUST start on 0
+    bounds = (0,width_kpc/2)  # MUST start on 0
     D_cm = lambda R: np.sqrt(R**2 + Rc_cm**2)
     vcirc_ideal_f = lambda R: vc_cms * R / D_cm(R)
     # vcirc_ideal_f = lambda R: vc_cms * R / (D_cm(R*4)/4)   * 1.2 * np.exp(-(D_cm(R*4)/4)/(5*Rc_cm))
@@ -1371,7 +1375,7 @@ if is_root:
     ax.set_xlabel("R [kpc]"); # ax.set_ylabel(r"Q")
     ax.set_title("Toomre stability")
     ax.legend()
-    ax.set_xlim(*bounds); ax.set_ylim(bottom=0)
+    ax.set_xlim(*bounds); ax.set_ylim(bottom=0, top=10)
     
     ax = axes[2]
     # ax.axvline(dead_zone_kpc, color="red",  ls=":", lw=1, label=f"Dead zone ({dead_zone_kpc:.2f} kpc)")
