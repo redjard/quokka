@@ -29,6 +29,8 @@
 #include "particles/particle_types.hpp"
 #include "physics_info.hpp"
 #include "util/BC.hpp"
+// comment out to disable MHD
+#define do_MHD
 
 namespace
 {
@@ -36,8 +38,10 @@ constexpr double alpha_profile = 2.0;
 constexpr double beta_profile = 0.5;
 constexpr double q_flatten = 0.7;
 constexpr double rho_transition = 1.0e-28;
+#ifdef do_MHD
 constexpr double target_beta_seed = 1.0e3;
 constexpr double axis_fallback_cells = 1.0;
+#endif  // do_MHD
 constexpr double turb_target_Mach = 0.5;
 
 constexpr double r_K_factor = 2.0;              // physical kernel radius, in units of dx (paper default 3.0)
@@ -74,7 +78,9 @@ template <> struct Physics_Traits<MHDGalaxy> : DefaultPhysicsTraits {
 	static constexpr bool is_radiation_enabled = false;
 	static constexpr bool is_dust_enabled = false;
 	static constexpr int nDustGroups = 0;
+#ifdef do_MHD
 	static constexpr bool is_mhd_enabled = true;
+#endif  // do_MHD
 };
 
 template <> struct SimulationData<MHDGalaxy> {
@@ -89,6 +95,7 @@ template <> struct SimulationData<MHDGalaxy> {
 	amrex::Real rho_cgm{};
 	amrex::Real rho_mid{};
 
+#ifdef do_MHD
 	// 2D Cylindrical potential field variables, read from metadata file
 	std::size_t seed_nR{};
 	std::size_t seed_nz{};
@@ -98,6 +105,7 @@ template <> struct SimulationData<MHDGalaxy> {
 	std::string seed_str; // magnetic seed
 
 	amrex::Gpu::DeviceVector<amrex::Real> Aphi_device;
+#endif  // do_MHD
 
 	// Supernova feedback parameters
 	amrex::Real sn_jeans_J;
@@ -432,6 +440,7 @@ template <> void QuokkaSimulation<MHDGalaxy>::preCalculateInitialConditions()
 	userData_.rho_cgm = rho_transition * (cs_disk * cs_disk) / (cs_cgm * cs_cgm);  // rho_cgm such that equal pressure at boundary (~3.54e-32)
 	userData_.rho_cgm = std::max( userData_.rho_cgm, dustDensityFloor_ );  // cgm density is at least the density floor
 
+#ifdef do_MHD
 	//-------//
 	// A_phi // - Load 2D Cylindrical A_phi Potential Table
 	//-------//
@@ -529,6 +538,7 @@ template <> void QuokkaSimulation<MHDGalaxy>::preCalculateInitialConditions()
 		amrex::Print() << "Seed field: target_beta=" << target_beta_seed << "  rho_mid=" << rho_mid << "  B_rms_HL=" << B_rms_HL
 			       << "  B0_scale=" << userData_.seed_B0_HL << " G*cm (HL)\n";
 	}
+#endif  // do_MHD
 
 	//---------------//
 	// Turb Sampling //
@@ -579,7 +589,9 @@ template <> void QuokkaSimulation<MHDGalaxy>::preCalculateInitialConditions()
 
 	amrex::Print() << "MHDGalaxy init complete\n"
 		       << "Mc=" << userData_.Mc << " Q=" << userData_.Q_mean << " Sigma0=" << userData_.Sigma0
+#ifdef do_MHD
 		       << " Seed=" << (userData_.seed_str.empty() ? std::string("<not found>") : userData_.seed_str) << "\n"
+#endif  // do_MHD
 		       << "sn_mass_per_event_msun=" << userData_.sn_mass_per_event_msun
 		       << " sn_cluster_momentum_exponent=" << userData_.sn_cluster_momentum_exponent << "\n"
 		       << "M_solar=" << C::M_solar << "\n";
@@ -602,8 +614,10 @@ template <> void QuokkaSimulation<MHDGalaxy>::setInitialConditionsOnGrid(quokka:
 	const double rho_cgm = userData_.rho_cgm;
 	constexpr double gamma = quokka::EOS_Traits<MHDGalaxy>::gamma;
 
+#ifdef do_MHD
 	const double B0_scale = userData_.seed_B0_HL;
 	AMREX_ALWAYS_ASSERT_WITH_MESSAGE(B0_scale > 0.0, "Beta-derived seed field strength must be positive.");
+#endif  // do_MHD
 
 	const amrex::Box &indexRange = grid_elem.indexRange_;
 	const auto prob_lo = grid_elem.prob_lo_;
@@ -639,6 +653,7 @@ template <> void QuokkaSimulation<MHDGalaxy>::setInitialConditionsOnGrid(quokka:
 	const double turb_dy = turb_Ly / static_cast<double>(turb_ny - 1);
 	const double turb_dz = turb_Lz / static_cast<double>(turb_nz - 1);
 
+#ifdef do_MHD
 	// Cylindrical Potential Table Pointers & Parameters for GPU Lambdas
 	const amrex::Real *aphi_ptr = userData_.Aphi_device.data();
 	const int nR_table = static_cast<int>(userData_.seed_nR);
@@ -684,6 +699,7 @@ template <> void QuokkaSimulation<MHDGalaxy>::setInitialConditionsOnGrid(quokka:
 		const double Aphi = get_Aphi_physical(x_e, y_e, z_e);
 		return Aphi * (x_e / R_e) * taper;
 	};
+#endif  // do_MHD
 
 	auto sampleSubcell = [=] AMREX_GPU_DEVICE(int i, int j, int k, double& rho_samples, double& px_samples, double& py_samples, double& pz_samples,
 	                                          double& Etot_samples, double& Eint_samples) {
@@ -727,6 +743,7 @@ template <> void QuokkaSimulation<MHDGalaxy>::setInitialConditionsOnGrid(quokka:
 		const double Eint = pressure / (gamma - 1.0);
 		const double Ekin = 0.5 * rho * (vx * vx + vy * vy + vz * vz);
 
+#ifdef do_MHD
 		const double x_node_lo = prob_lo[0] + (i + 0) * dx;
 		const double x_node_hi = prob_lo[0] + (i + 1) * dx;
 		const double y_node_lo = prob_lo[1] + (j + 0) * dy;
@@ -769,6 +786,9 @@ template <> void QuokkaSimulation<MHDGalaxy>::setInitialConditionsOnGrid(quokka:
 		const double Bz_cc = ((Ay_r_cc - Ay_l_cc) / dx) - ((Ax_t_cc - Ax_b_cc) / dy);
 
 		const double Emag = 0.5 * (Bx_cc * Bx_cc + By_cc * By_cc + Bz_cc * Bz_cc);
+#else  // do_MHD
+		const double Emag = 0.0;
+#endif  // do_MHD
 
 		rho_samples += rho;
 		px_samples += rho * vx;
@@ -806,6 +826,7 @@ template <> void QuokkaSimulation<MHDGalaxy>::setInitialConditionsOnGrid(quokka:
 	});
 }
 
+#ifdef do_MHD
 template <> void QuokkaSimulation<MHDGalaxy>::setInitialConditionsOnGridFaceVars(quokka::grid const &grid_elem)
 {
 	const amrex::Array4<amrex::Real> &state_fc = grid_elem.array_;
@@ -956,6 +977,7 @@ template <> void QuokkaSimulation<MHDGalaxy>::setInitialConditionsOnGridFaceVars
 		state_fc(i, j, k, 0) = B_face;
 	});
 }
+#endif  // do_MHD
 
 template <> void QuokkaSimulation<MHDGalaxy>::addStrangSplitSources(amrex::MultiFab &mf, int lev, amrex::Real /*time*/, amrex::Real dt_lev)
 {
@@ -1474,6 +1496,7 @@ void QuokkaSimulation<MHDGalaxy>::ComputeDerivedVar(int lev, std::string const &
 		return;
 	}
 
+#ifdef do_MHD
 	if (dname == "plasma_beta") {
 		auto const &state_arrs = state_cc.const_arrays();
 		auto const &Bx_arrs = state_fc[0].const_arrays();
@@ -1530,6 +1553,7 @@ void QuokkaSimulation<MHDGalaxy>::ComputeDerivedVar(int lev, std::string const &
 		amrex::Gpu::streamSynchronize();
 		return;
 	}
+#endif  // do_MHD
 
 	// default case, set field NaN
 	auto out_arrs = mf.arrays();
@@ -1540,6 +1564,7 @@ void QuokkaSimulation<MHDGalaxy>::ComputeDerivedVar(int lev, std::string const &
 template <> auto QuokkaSimulation<MHDGalaxy>::ComputeStatistics() -> std::map<std::string, amrex::Real>
 {
 	std::map<std::string, amrex::Real> stats;
+#ifdef do_MHD
 	const amrex::Real R_min = 2.0 * 1.0e3 * C::parsec;
 	const amrex::Real R_max = 8.0 * 1.0e3 * C::parsec;
 	const amrex::Real z_max = 0.5 * 1.0e3 * C::parsec;
@@ -1557,6 +1582,7 @@ template <> auto QuokkaSimulation<MHDGalaxy>::ComputeStatistics() -> std::map<st
 	amrex::Real divB_sumsq_global = 0.0;
 	amrex::Real divB_norm_sumsq_global = 0.0;
 	amrex::Real divB_norm_ncells_global = 0.0;
+#endif  // do_MHD
 
 	using FaceStateArray = std::array<amrex::Array4<const Real>, AMREX_SPACEDIM>;
 
@@ -1595,6 +1621,7 @@ template <> auto QuokkaSimulation<MHDGalaxy>::ComputeStatistics() -> std::map<st
 
 	stats["sigma_eta"] = (disk_volume > 0.0) ? std::sqrt(sigma_vol / disk_volume) : static_cast<amrex::Real>(0.0);
 
+#ifdef do_MHD
 	for (int lev = 0; lev <= finest_level; ++lev) {
 		const auto &geom_lev = geom[lev];
 		auto const &state_fc = state_new_fc_[lev];
@@ -1708,6 +1735,7 @@ template <> auto QuokkaSimulation<MHDGalaxy>::ComputeStatistics() -> std::map<st
 	stats["divB_max"] = divB_max_reduced;
 	stats["divB_rms"] = std::sqrt(divB_sums[0] / total_volume);
 	stats["divB_rms_normalized"] = (divB_sums[2] > 0.0) ? std::sqrt(divB_sums[1] / divB_sums[2]) : static_cast<amrex::Real>(0.0);
+#endif  // do_MHD
 	stats["sn_count_cumulative"] = static_cast<amrex::Real>(sn_count_cumulative_);
 	stats["sn_trigger_count_cumulative"] = static_cast<amrex::Real>(userData_.sn_trigger_count_cumulative);
 	return stats;
@@ -1715,6 +1743,7 @@ template <> auto QuokkaSimulation<MHDGalaxy>::ComputeStatistics() -> std::map<st
 
 auto problem_main() -> int
 {
+#ifdef do_MHD
 	auto BCs_cc = quokka::BC<MHDGalaxy>(quokka::BCType::reflecting);
 
 	const int nvars_fc = Physics_Indices<MHDGalaxy>::nvarTotal_fc;
@@ -1730,6 +1759,10 @@ auto problem_main() -> int
 	}
 
 	QuokkaSimulation<MHDGalaxy> sim(BCs_cc, BCs_fc);
+#else  // do_MHD
+	auto BCs_cc = quokka::BC<MHDGalaxy>(quokka::BCType::foextrap);
+	QuokkaSimulation<MHDGalaxy> sim(BCs_cc);
+#endif  // do_MHD
 	sim.preCalculateInitialConditions();
 	sim.setInitialConditions();
 	sim.evolve();
