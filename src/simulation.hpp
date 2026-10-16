@@ -138,6 +138,11 @@ inline auto formatRealVect(amrex::RealVect const &rv) -> std::string
 #endif
 }
 
+inline auto formatRealVect2(amrex::RealVect const &rv) -> std::string
+{
+	return std::format("({:5.2f}, {:5.2f}, {:5.2f})", rv[0], rv[1], rv[2]);
+}
+
 using variant_t = std::variant<amrex::Real, std::string>;
 
 namespace YAML
@@ -235,7 +240,9 @@ template <typename problem_t> class AMRSimulation : public amrex::AmrCore
 
 	amrex::Real densityFloor_ = 0.0;     // default
 	amrex::Real dustDensityFloor_ = 0.0; // default
+	amrex::Real velCeil_ = std::numeric_limits<double>::max();  // default
 	amrex::Real tempFloor_ = 0.0;	     // default
+	amrex::Real tempCeil_ = std::numeric_limits<double>::max();  // default
 	bool useDensityFloorParser_ = false;
 	std::string densityFloorExpr_;
 	std::optional<amrex::Parser> densityFloorParser_;
@@ -1013,8 +1020,10 @@ template <typename problem_t> void AMRSimulation<problem_t>::readParameters()
 	// read density floor in g cm^-3
 	pp.query("density_floor", densityFloor_);
 
+	pp.query("velocity_ceiling", velCeil_);
 	// read temperature floor in K
 	pp.query("temperature_floor", tempFloor_);
+	pp.query("temperature_ceiling", tempCeil_);
 
 	// optional density floor expression (variables: x, y, z, base_density_floor)
 	densityFloorExpr_.clear();
@@ -1260,9 +1269,9 @@ template <typename problem_t> auto AMRSimulation<problem_t>::computeTimestepAtLe
 	dtloc_t hydro_dt{.value = cflNumber_ * (dx_min / domain_signal_max), .index = domain_signal_maxloc};
 
 	if (verbose) {
-		amrex::Print() << std::format("lvl {} {} has dt {:e} (", lev, formatIntVect(hydro_dt.index), hydro_dt.value);
-		// amrex::Print() << std::format("...[level {}] \thydro timestep limited at cell {} with signal speed = {:e}\n", lev,
-		// 			      formatIntVect(hydro_dt.index), domain_signal_max);
+		// amrex::Print() << std::format("lvl {} {} has dt {:e} (", lev, formatIntVect(hydro_dt.index), hydro_dt.value);
+		const amrex::RealVect pos = amrex::RealVect(geom[lev].ProbLoArray()) + amrex::RealVect(dx) * amrex::RealVect(hydro_dt.index);
+		amrex::Print() << std::format("lvl {} {}kpc has dt {:e} (", lev, formatRealVect2(pos/C::parsec/1e3), hydro_dt.value);
 		printCellProperties(lev, hydro_dt.index);
 		amrex::Print() << ")\n";
 	}
@@ -1474,10 +1483,10 @@ template <typename problem_t> void AMRSimulation<problem_t>::evolve()
 
 	getWalltime(); // initialize start_time
 
-	constexpr int eta_window = 10;
-	amrex::Real step_times[eta_window] = {0.0};
-	amrex::Real sim_times[eta_window]  = {0.0};
-	int buf_idx = 0;
+	constexpr int eta_window = 100;
+	amrex::Real step_times[eta_window] = {NAN};
+	amrex::Real sim_times[eta_window]  = {NAN};
+	int len = 0;
 
 	// Main time loop
 	int step = istep[0];
@@ -1492,23 +1501,25 @@ template <typename problem_t> void AMRSimulation<problem_t>::evolve()
 
 		amrex::ParallelDescriptor::Barrier(); // synchronize all MPI ranks
 		
-		const amrex::Real prev_step = step_times[buf_idx];
-		const amrex::Real prev_sim = sim_times[buf_idx];
-		step_times[buf_idx] = amrex::ParallelDescriptor::second();
-		sim_times[buf_idx] = cur_time;
-		buf_idx++; buf_idx %= eta_window;
+		const amrex::Real now = amrex::ParallelDescriptor::second();
+		const int buf_index = len%eta_window;
+		const int window_start = len > eta_window ? buf_index : 0;
 		
-		const amrex::Real eta = (stopTime_ - cur_time) * ( step_times[buf_idx] - prev_step )/( sim_times[buf_idx] - prev_sim );
+		const amrex::Real eta = (stopTime_ - cur_time) * ( now - step_times[window_start] )/( cur_time - sim_times[window_start] );
+		
+		step_times[buf_index] = now;
+		sim_times[buf_index] = cur_time;
+		len++;
 		
 		long long s = static_cast<long long>(std::llround(eta));
-		const int ss = static_cast<int>(s % 60); s /= 60;
-		const int mm = static_cast<int>(s % 60); s /= 60;
+		const int ss = s % 60; s /= 60;
+		const int mm = s % 60; s /= 60;
 		const long long hh = s;
 		
 		if (0 <= hh && hh <= 100'000) {
-			amrex::Print() << std::format("{:02}:{:02}:{:02}", hh, mm, ss);
+			amrex::Print() << std::format("{:3}:{:02}:{:02}", hh, mm, ss);
 		} else {
-			amrex::Print() << "--:--:--";
+			amrex::Print() << " --:--:--";
 		}
 
 		if (suppress_output == 0) {
@@ -1982,7 +1993,7 @@ template <typename problem_t> void AMRSimulation<problem_t>::calculateGpotAllLev
 		// check for NaN
 		for (int lev = 0; lev <= finest_level; ++lev) {
 			// NOTE: this fails when multiple levels are fully refined when open boundary condition is used.
-			AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!phi[lev].contains_nan(), std::format("NaN detected in phi at level {} after Poisson solve", lev));
+			AMREX_ALWAYS_ASSERT_WITH_MESSAGE(!phi[lev].contains_nan(), std::format("NaN detected in phi at level {} after Poisson solve (NOTE: this fails when multiple levels are fully refined when open boundary condition is used)", lev));
 		}
 	}
 #endif // AMREX_SPACEDIM == 3

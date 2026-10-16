@@ -136,7 +136,9 @@ template <typename problem_t> class QuokkaSimulation : public AMRSimulation<prob
 
 	using AMRSimulation<problem_t>::densityFloor_;
 	using AMRSimulation<problem_t>::dustDensityFloor_;
+	using AMRSimulation<problem_t>::velCeil_;
 	using AMRSimulation<problem_t>::tempFloor_;
+	using AMRSimulation<problem_t>::tempCeil_;
 
 	using AMRSimulation<problem_t>::max_level;
 	using AMRSimulation<problem_t>::n_error_buf;
@@ -971,9 +973,11 @@ template <typename problem_t> void QuokkaSimulation<problem_t>::printCellPropert
 		const amrex::Real Eint = Etot - Ekin;
 		const amrex::Real P = ::quokka::EOS<problem_t>::ComputePressure(rho, Eint);
 		const amrex::Real cs = ::quokka::EOS<problem_t>::ComputeSoundSpeed(rho, P);
+		const amrex::Real µ = ::quokka::EOS_Traits<problem_t>::mean_molecular_weight;
+		const amrex::Real T = (µ / C::k_B) * (P / rho);
 
 		// amrex::AllPrint() << std::format("...[level {}] \tcell density = {:e}, |v| = {:e}, cs = {:e}\n", lev, rho, vel_mag, cs);
-		amrex::Print() << std::format("ρ = {:.3e}, |v| = {:.3e}, cs = {:.3e}", rho, vel_mag, cs);
+		amrex::Print() << std::format("ρ = {:.3e}, |v| = {:.3e}, cs = {:.3e}, T = {:.3e}", rho, vel_mag, cs, T);
 	}
 }
 
@@ -2013,13 +2017,13 @@ void QuokkaSimulation<problem_t>::ApplyHydroStateFixup(amrex::MultiFab &state_cc
 									  amrex::Real base_density_floor) -> amrex::Real {
 			return density_floor_parser(x, y, z, base_density_floor);
 		};
-		HydroSystem<problem_t>::EnforceLimits(densityFloor_, dustDensityFloor_, tempFloor_, state_cc, state_fc, geom[lev], density_floor_func);
+		HydroSystem<problem_t>::EnforceLimits(densityFloor_, dustDensityFloor_, velCeil_, tempFloor_, tempCeil_, state_cc, state_fc, geom[lev], density_floor_func);
 	} else {
 		auto const density_floor_func = [this] AMREX_GPU_HOST_DEVICE(amrex::Real x, amrex::Real y, amrex::Real z,
 									     amrex::Real base_density_floor) -> amrex::Real {
 			return densityFloor(x, y, z, base_density_floor);
 		};
-		HydroSystem<problem_t>::EnforceLimits(densityFloor_, dustDensityFloor_, tempFloor_, state_cc, state_fc, geom[lev], density_floor_func);
+		HydroSystem<problem_t>::EnforceLimits(densityFloor_, dustDensityFloor_, velCeil_, tempFloor_, tempCeil_, state_cc, state_fc, geom[lev], density_floor_func);
 	}
 
 	if (useDualEnergy_ == 1) {
@@ -3015,7 +3019,7 @@ void QuokkaSimulation<problem_t>::hydroFluxFunction(amrex::MultiFab &primVar_mf,
 		    flux, faceVel, leftState, rightState, leftState_bfield, rightState_bfield, primVar_mf, artificialViscosityK_, dx, shearViscosity_,
 		    bulkViscosity_, &x1FSpds, &consVar_fc[static_cast<int>(DIR)], nghost_Riemann);
 	} else {
-		HydroSystem<problem_t>::template ComputeFluxes<RiemannSolver::HLLC, DIR>(flux, faceVel, leftState, rightState, leftState_bfield,
+		HydroSystem<problem_t>::template ComputeFluxes<RiemannSolver::HLLD_HD, DIR>(flux, faceVel, leftState, rightState, leftState_bfield,
 											 rightState_bfield, primVar_mf, artificialViscosityK_, dx,
 											 shearViscosity_, bulkViscosity_, nullptr, nullptr, nghost_Riemann);
 	}

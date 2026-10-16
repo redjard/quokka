@@ -29,6 +29,7 @@
 #include "EOS.hpp"
 #include "HLLC.hpp"
 #include "HLLD.hpp"
+#include "HLLD_HD.hpp"
 #include "LLF.hpp"
 #include "LLF_mhd.hpp"
 #include "dust/dust_system.hpp"
@@ -54,7 +55,7 @@ template <typename T> struct dependent_false : std::false_type {
 };
 template <typename T> inline constexpr bool dependent_false_v = dependent_false<T>::value;
 
-enum class RiemannSolver { HLLC, LLF, LLF_MHD, HLLD };
+enum class RiemannSolver { HLLC, LLF, LLF_MHD, HLLD, HLLD_HD };
 
 /// Class for the Euler equations of inviscid hydrodynamics
 ///
@@ -165,7 +166,7 @@ template <typename problem_t> class HydroSystem : public HyperbolicSystem<proble
 	AMREX_GPU_DEVICE static auto GetGradFixedPotential(amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> posvec) -> amrex::GpuArray<amrex::Real, AMREX_SPACEDIM>;
 
 	template <typename DensityFloorFunc>
-	static void EnforceLimits(amrex::Real densityFloor, amrex::Real dustDensityFloor, amrex::Real tempFloor, amrex::MultiFab &state_mf,
+	static void EnforceLimits(amrex::Real densityFloor, amrex::Real dustDensityFloor, amrex::Real const velCeil, amrex::Real tempFloor, amrex::Real const tempCeil, amrex::MultiFab &state_mf,
 				  std::array<amrex::MultiFab, AMREX_SPACEDIM> const &state_fc_mf, amrex::Geometry const &geom,
 				  DensityFloorFunc const &density_floor_func);
 
@@ -1021,10 +1022,15 @@ void HydroSystem<problem_t>::FlattenShocks(amrex::MultiFab const &q_mf, amrex::M
 // floors and ceilings which can be set in the param file
 template <typename problem_t>
 template <typename DensityFloorFunc>
-void HydroSystem<problem_t>::EnforceLimits(amrex::Real const densityFloor, amrex::Real const dustDensityFloor, amrex::Real const tempFloor,
-					   amrex::MultiFab &state_mf, std::array<amrex::MultiFab, AMREX_SPACEDIM> const &state_fc_mf,
-					   amrex::Geometry const &geom, DensityFloorFunc const &density_floor_func)
-{
+void HydroSystem<problem_t>::EnforceLimits(
+	amrex::Real const densityFloor,
+	amrex::Real const dustDensityFloor,
+	amrex::Real const velCeil,
+	amrex::Real const tempFloor,
+	amrex::Real const tempCeil,
+	amrex::MultiFab &state_mf, std::array<amrex::MultiFab, AMREX_SPACEDIM> const &state_fc_mf,
+	amrex::Geometry const &geom, DensityFloorFunc const &density_floor_func
+) {
 	auto state = state_mf.arrays();
 	auto const &state_fc_x0 = state_fc_mf[0].const_arrays();
 #if AMREX_SPACEDIM >= 2
@@ -1103,13 +1109,29 @@ void HydroSystem<problem_t>::EnforceLimits(amrex::Real const densityFloor, amrex
 				}
 			}
 		}
+		
+		// velocity ceiling
+		amrex::Real vx1 = state[bx](i, j, k, x1Momentum_index) / rho_new;
+		amrex::Real vx2 = state[bx](i, j, k, x2Momentum_index) / rho_new;
+		amrex::Real vx3 = state[bx](i, j, k, x3Momentum_index) / rho_new;
+		amrex::Real vsq = vx1 * vx1 + vx2 * vx2 + vx3 * vx3;
+		amrex::Real Ekin = 0.5 * rho_new * vsq;
+		if (vsq > velCeil*velCeil) {
+			state[bx](i, j, k, energy_index) -= Ekin;
+			const amrex::Real overshoot = std::sqrt(vsq)/velCeil;
+			vx1 /= overshoot;
+			vx2 /= overshoot;
+			vx3 /= overshoot;
+			vsq = vx1 * vx1 + vx2 * vx2 + vx3 * vx3;
+			Ekin = 0.5 * rho_new * vsq;
+			state[bx](i, j, k, energy_index) += Ekin;
+			state[bx](i, j, k, x1Momentum_index) = vx1 * rho_new;
+			state[bx](i, j, k, x2Momentum_index) = vx2 * rho_new;
+			state[bx](i, j, k, x3Momentum_index) = vx3 * rho_new;
+		}
 
 		// Enforce temperature floor
 		if ((rho_new > std::numeric_limits<amrex::Real>::min()) && !HydroSystem<problem_t>::is_eos_isothermal()) {
-			amrex::Real const vx1 = state[bx](i, j, k, x1Momentum_index) / rho_new;
-			amrex::Real const vx2 = state[bx](i, j, k, x2Momentum_index) / rho_new;
-			amrex::Real const vx3 = state[bx](i, j, k, x3Momentum_index) / rho_new;
-			amrex::Real const Ekin = 0.5 * rho_new * (vx1 * vx1 + vx2 * vx2 + vx3 * vx3);
 
 			// Enforce temperature floor (for total energy)
 			// First-capture face-centered arrays before any constexpr-if context for CUDA.
@@ -1146,6 +1168,9 @@ void HydroSystem<problem_t>::EnforceLimits(amrex::Real const densityFloor, amrex
 			if (primTemp < tempFloor) {
 				amrex::Real const prim_eint = ::quokka::EOS<problem_t>::ComputeEintFromTgas(rho_new, tempFloor, massScalars);
 				state[bx](i, j, k, energy_index) = Ekin + Emag + prim_eint;
+			} else if (primTemp > tempCeil) {
+				amrex::Real const prim_eint = ::quokka::EOS<problem_t>::ComputeEintFromTgas(rho_new, tempCeil, massScalars);
+				state[bx](i, j, k, energy_index) = Ekin + Emag + prim_eint;
 			}
 
 			// Enforce temperature floor (for auxiliary internal energy)
@@ -1154,6 +1179,10 @@ void HydroSystem<problem_t>::EnforceLimits(amrex::Real const densityFloor, amrex
 
 			if (auxTemp < tempFloor) {
 				amrex::Real const new_Eint = ::quokka::EOS<problem_t>::ComputeEintFromTgas(rho_new, tempFloor, massScalars);
+				state[bx](i, j, k, internalEnergy_index) = new_Eint;
+				// total energy should NOT be updated here
+			} else if (primTemp > tempCeil) {
+				amrex::Real const new_Eint = ::quokka::EOS<problem_t>::ComputeEintFromTgas(rho_new, tempCeil, massScalars);
 				state[bx](i, j, k, internalEnergy_index) = new_Eint;
 				// total energy should NOT be updated here
 			}
@@ -1542,8 +1571,10 @@ void HydroSystem<problem_t>::ComputeFluxes(amrex::MultiFab &x1Flux_mf, amrex::Mu
 
 		if constexpr (RIEMANN == RiemannSolver::HLLC) {
 			static_assert(!Physics_Traits<problem_t>::is_mhd_enabled, "Cannot use HLLC solver for MHD problems!");
-			// F_canonical = quokka::Riemann::HLLC<problem_t, nscalars_, nmscalars_, nHydroScalars_>(sL, sR, gamma_, du, dw);
-			F_canonical = std::get<0>( quokka::Riemann::HLLD<problem_t, nscalars_, nmscalars_, nHydroScalars_>(sL, sR, gamma_, 0, dw) );
+			F_canonical = quokka::Riemann::HLLC<problem_t, nscalars_, nmscalars_, nHydroScalars_>(sL, sR, gamma_, du, dw);
+		} else if constexpr (RIEMANN == RiemannSolver::HLLD_HD) {
+			static_assert(!Physics_Traits<problem_t>::is_mhd_enabled, "Cannot use HLLD_HD solver for MHD problems!");
+			F_canonical = quokka::Riemann::HLLD_HD<problem_t, nscalars_, nmscalars_, nHydroScalars_>(sL, sR, gamma_, dw);
 		} else if constexpr (RIEMANN == RiemannSolver::LLF) {
 			F_canonical = quokka::Riemann::LLF<problem_t, nscalars_, nmscalars_, nHydroScalars_>(sL, sR);
 		} else if constexpr (RIEMANN == RiemannSolver::LLF_MHD) {
